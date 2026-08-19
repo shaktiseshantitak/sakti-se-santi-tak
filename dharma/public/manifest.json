@@ -1,0 +1,21 @@
+{
+  "short_name": "ShaktiSeShanti",
+  "name": "शक्ति से शांति - Shanti Se Shakti Sacred Books",
+  "icons": [
+    {
+      "src": "/images/shakti-book-cover.jpg",
+      "type": "image/jpeg",
+      "sizes": "192x192"
+    },
+    {
+      "src": "/images/shakti-book-cover.jpg",
+      "type": "image/jpeg",
+      "sizes": "512x512"
+    }
+  ],
+  "start_url": "/",
+  "background_color": "#09090b",
+  "theme_color": "#8B1E3F",
+  "display": "standalone",
+  "orientation": "portrait"
+}

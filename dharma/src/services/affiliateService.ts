@@ -1,0 +1,623 @@
+import {
+  AffiliateRank,
+  AffiliateRankCriteria,
+  CommissionRecord,
+  CommissionSettings,
+  FraudAuditLog,
+  LeaderboardUser,
+  ReferralLink,
+  TeamMember,
+  WalletBalance,
+  WalletLedgerItem,
+  WithdrawalRequest,
+  AffiliateDashboardStats,
+  AffiliateNotification
+} from '../types/affiliate';
+import { supabase, isSupabaseConfigured } from '../lib/supabase';
+
+const LOCAL_STORAGE_KEYS = {
+  SETTINGS: 'dharma_affiliate_settings',
+  REFERRALS: 'dharma_affiliate_referrals',
+  WALLETS: 'dharma_affiliate_wallets',
+  COMMISSIONS: 'dharma_affiliate_commissions',
+  WITHDRAWALS: 'dharma_affiliate_withdrawals',
+  TEAM: 'dharma_affiliate_team',
+  FRAUD_LOGS: 'dharma_affiliate_fraud',
+  NOTIFICATIONS: 'dharma_affiliate_notifications',
+  ACTIVE_REF: 'dharma_active_referral_code',
+};
+
+export const DEFAULT_COMMISSION_SETTINGS: CommissionSettings = {
+  level1Percent: 10,
+  level2Percent: 5,
+  level3Percent: 2.5,
+  unlimitedTierPercent: 1,
+  minWithdrawalAmount: 500,
+  holdPeriodDays: 7,
+  autoApproveWithdrawalsUnder: 1000,
+};
+
+export const DEFAULT_RANKS_CRITERIA: AffiliateRankCriteria[] = [
+  {
+    rank: 'Bronze',
+    minSalesAmount: 0,
+    minActiveReferrals: 0,
+    commissionBonusPercent: 0,
+    badgeColor: '#CD7F32',
+    perks: ['Standard 3-Level Commission', 'Instant Unique QR Link', 'Weekly Payouts'],
+  },
+  {
+    rank: 'Silver',
+    minSalesAmount: 15000,
+    minActiveReferrals: 5,
+    commissionBonusPercent: 1.5,
+    badgeColor: '#C0C0C0',
+    perks: ['+1.5% Extra Bonus Commission', 'Priority Support', 'Custom Coupon Code'],
+  },
+  {
+    rank: 'Gold',
+    minSalesAmount: 50000,
+    minActiveReferrals: 15,
+    commissionBonusPercent: 3.0,
+    badgeColor: '#D4AF37',
+    perks: ['+3.0% Extra Bonus Commission', '24-Hour Express Withdrawals', 'Exclusive Marketing Kit'],
+  },
+  {
+    rank: 'Platinum',
+    minSalesAmount: 150000,
+    minActiveReferrals: 35,
+    commissionBonusPercent: 5.0,
+    badgeColor: '#E5E4E2',
+    perks: ['+5.0% Extra Bonus Commission', 'Dedicated Affiliate Manager', 'Monthly Milestone Bonuses'],
+  },
+  {
+    rank: 'Diamond',
+    minSalesAmount: 500000,
+    minActiveReferrals: 100,
+    commissionBonusPercent: 7.5,
+    badgeColor: '#B9F2FF',
+    perks: ['+7.5% Extra Bonus Commission', 'VVIP Event Passes', 'Zero Payout Fee'],
+  },
+  {
+    rank: 'Crown',
+    minSalesAmount: 1500000,
+    minActiveReferrals: 300,
+    commissionBonusPercent: 10.0,
+    badgeColor: '#9B51E0',
+    perks: ['+10.0% Extra Bonus Commission', 'Profit Sharing Pool', 'Custom Domain Branding'],
+  },
+];
+
+// Initial mock data for quick immediate preview
+const INITIAL_DEMO_WALLET: WalletBalance = {
+  totalEarnings: 18450,
+  pendingEarnings: 3200,
+  withdrawableBalance: 12250,
+  lifetimeEarnings: 21650,
+};
+
+const INITIAL_DEMO_STATS: AffiliateDashboardStats = {
+  totalClicks: 1420,
+  uniqueVisitors: 980,
+  totalSignups: 48,
+  totalOrders: 32,
+  conversionRate: 3.26,
+  totalIncome: 18450,
+  monthlyIncome: 6450,
+};
+
+const INITIAL_DEMO_TEAM: TeamMember[] = [
+  {
+    id: 'team-101',
+    name: 'Pandit Rameshwar Shastri',
+    email: 'rameshwar@dharmabooks.pro',
+    phone: '+91 98765 11111',
+    level: 1,
+    joinDate: '2026-01-15',
+    totalSales: 45000,
+    totalCommissionsEarned: 4500,
+    status: 'active',
+    subMembers: [
+      {
+        id: 'team-201',
+        name: 'Vidwan Kunjesh Sharma',
+        email: 'kunjesh@dharmabooks.pro',
+        level: 2,
+        joinDate: '2026-02-01',
+        totalSales: 22000,
+        totalCommissionsEarned: 1100,
+        status: 'active',
+        subMembers: [
+          {
+            id: 'team-301',
+            name: 'Acharya Poonam Sharma',
+            email: 'poonam@dharmabooks.pro',
+            level: 3,
+            joinDate: '2026-03-10',
+            totalSales: 12000,
+            totalCommissionsEarned: 300,
+            status: 'active',
+          },
+        ],
+      },
+    ],
+  },
+  {
+    id: 'team-102',
+    name: 'Sadhvi Sunita Devi',
+    email: 'sunita@dharmabooks.pro',
+    phone: '+91 98111 22222',
+    level: 1,
+    joinDate: '2026-02-20',
+    totalSales: 28000,
+    totalCommissionsEarned: 2800,
+    status: 'active',
+  },
+  {
+    id: 'team-103',
+    name: 'Shri Anand Prakash',
+    email: 'anand@dharmabooks.pro',
+    phone: '+91 99888 33333',
+    level: 1,
+    joinDate: '2026-04-05',
+    totalSales: 8500,
+    totalCommissionsEarned: 850,
+    status: 'active',
+  },
+];
+
+const INITIAL_COMMISSIONS: CommissionRecord[] = [
+  {
+    id: 'COMM-8801',
+    orderId: 'ORD-99821',
+    buyerName: 'Dr. Harihar Trivedi',
+    orderAmount: 2499,
+    level: 1,
+    ratePercent: 10,
+    commissionAmount: 249.9,
+    status: 'approved',
+    createdAt: '2026-07-28 14:30',
+  },
+  {
+    id: 'COMM-8802',
+    orderId: 'ORD-99845',
+    buyerName: 'Smt. Gayatri Mishra',
+    orderAmount: 499,
+    level: 1,
+    ratePercent: 10,
+    commissionAmount: 49.9,
+    status: 'pending',
+    createdAt: '2026-08-01 10:15',
+  },
+  {
+    id: 'COMM-8803',
+    orderId: 'ORD-99890',
+    buyerName: 'Acharya Balkrishna',
+    orderAmount: 1499,
+    level: 2,
+    ratePercent: 5,
+    commissionAmount: 74.95,
+    status: 'approved',
+    createdAt: '2026-08-04 16:45',
+  },
+];
+
+const INITIAL_WITHDRAWALS: WithdrawalRequest[] = [
+  {
+    id: 'WTH-501',
+    userId: 'user-default',
+    userName: 'Acharya Rahul Sharma',
+    amount: 5000,
+    method: 'upi',
+    details: { upiId: 'rahulsharma@okaxis' },
+    status: 'paid',
+    requestedAt: '2026-07-10 11:20',
+    processedAt: '2026-07-10 14:00',
+    transactionId: 'UPI-TXN-99887711',
+    adminNote: 'Transfer successful to verified UPI ID.',
+  },
+  {
+    id: 'WTH-502',
+    userId: 'user-default',
+    userName: 'Acharya Rahul Sharma',
+    amount: 3500,
+    method: 'bank',
+    details: {
+      accountNumber: 'XXXXXX9821',
+      ifscCode: 'SBIN0001234',
+      bankName: 'State Bank of India',
+      holderName: 'Rahul Sharma',
+    },
+    status: 'pending',
+    requestedAt: '2026-08-05 09:10',
+  },
+];
+
+const INITIAL_FRAUD_LOGS: FraudAuditLog[] = [
+  {
+    id: 'FRD-101',
+    userId: 'user-9912',
+    userName: 'Guest Browser 412',
+    ipAddress: '192.168.1.45',
+    eventType: 'self_referral_blocked',
+    severity: 'medium',
+    details: 'User attempted to purchase using their own referral code SHAKTI-R9872.',
+    timestamp: '2026-08-02 18:22:10',
+  },
+];
+
+const INITIAL_LEADERBOARD: LeaderboardUser[] = [
+  { rank: 1, userName: 'Acharya Rahul Sharma', monthlyVolume: 125000, monthlyCommissions: 12500, tier: 'Gold' },
+  { rank: 2, userName: 'Pandit Rameshwar Shastri', monthlyVolume: 98000, monthlyCommissions: 9800, tier: 'Silver' },
+  { rank: 3, userName: 'Sadhvi Sunita Devi', monthlyVolume: 74000, monthlyCommissions: 740, tier: 'Silver' },
+  { rank: 4, userName: 'Shri Anand Prakash', monthlyVolume: 51000, monthlyCommissions: 5100, tier: 'Bronze' },
+  { rank: 5, userName: 'Swami Dayanand', monthlyVolume: 39000, monthlyCommissions: 3900, tier: 'Bronze' },
+];
+
+export class AffiliateService {
+  /**
+   * Reads settings from storage or default
+   */
+  static getSettings(): CommissionSettings {
+    try {
+      const stored = localStorage.getItem(LOCAL_STORAGE_KEYS.SETTINGS);
+      return stored ? JSON.parse(stored) : DEFAULT_COMMISSION_SETTINGS;
+    } catch {
+      return DEFAULT_COMMISSION_SETTINGS;
+    }
+  }
+
+  static saveSettings(settings: CommissionSettings): void {
+    localStorage.setItem(LOCAL_STORAGE_KEYS.SETTINGS, JSON.stringify(settings));
+  }
+
+  /**
+   * Generates or retrieves unique referral code for user
+   */
+  static getUserReferralCode(userEmail?: string): string {
+    const key = `dharma_ref_code_${userEmail || 'guest'}`;
+    let code = localStorage.getItem(key);
+    if (!code) {
+      const suffix = Math.floor(1000 + Math.random() * 9000);
+      const prefix = userEmail ? userEmail.split('@')[0].toUpperCase().slice(0, 6) : 'SHAKTI';
+      code = `${prefix}-${suffix}`;
+      localStorage.setItem(key, code);
+    }
+    return code;
+  }
+
+  /**
+   * Tracks incoming referral code from URL parameter e.g. ?ref=CODE
+   */
+  static handleReferralClick(refCode: string, userEmail?: string): boolean {
+    if (!refCode) return false;
+
+    // Self-referral protection check
+    const userCode = this.getUserReferralCode(userEmail);
+    if (userCode.toLowerCase() === refCode.toLowerCase()) {
+      this.logFraud({
+        userId: userEmail || 'guest',
+        userName: userEmail || 'Guest Visitor',
+        ipAddress: '127.0.0.1',
+        eventType: 'self_referral_blocked',
+        severity: 'medium',
+        details: `Blocked self-referral click for code: ${refCode}`,
+      });
+      return false;
+    }
+
+    localStorage.setItem(LOCAL_STORAGE_KEYS.ACTIVE_REF, refCode);
+    return true;
+  }
+
+  static getActiveReferralCode(): string | null {
+    return localStorage.getItem(LOCAL_STORAGE_KEYS.ACTIVE_REF);
+  }
+
+  /**
+   * Retrieves wallet balance
+   */
+  static getWalletBalance(): WalletBalance {
+    try {
+      const stored = localStorage.getItem(LOCAL_STORAGE_KEYS.WALLETS);
+      return stored ? JSON.parse(stored) : INITIAL_DEMO_WALLET;
+    } catch {
+      return INITIAL_DEMO_WALLET;
+    }
+  }
+
+  static updateWalletBalance(wallet: WalletBalance): void {
+    localStorage.setItem(LOCAL_STORAGE_KEYS.WALLETS, JSON.stringify(wallet));
+  }
+
+  /**
+   * Dashboard Stats
+   */
+  static getDashboardStats(): AffiliateDashboardStats {
+    try {
+      const stored = localStorage.getItem('dharma_aff_stats');
+      return stored ? JSON.parse(stored) : INITIAL_DEMO_STATS;
+    } catch {
+      return INITIAL_DEMO_STATS;
+    }
+  }
+
+  /**
+   * Team Structure
+   */
+  static getTeamMembers(): TeamMember[] {
+    try {
+      const stored = localStorage.getItem(LOCAL_STORAGE_KEYS.TEAM);
+      return stored ? JSON.parse(stored) : INITIAL_DEMO_TEAM;
+    } catch {
+      return INITIAL_DEMO_TEAM;
+    }
+  }
+
+  /**
+   * Commissions List
+   */
+  static getCommissions(): CommissionRecord[] {
+    try {
+      const stored = localStorage.getItem(LOCAL_STORAGE_KEYS.COMMISSIONS);
+      return stored ? JSON.parse(stored) : INITIAL_COMMISSIONS;
+    } catch {
+      return INITIAL_COMMISSIONS;
+    }
+  }
+
+  static saveCommissions(records: CommissionRecord[]): void {
+    localStorage.setItem(LOCAL_STORAGE_KEYS.COMMISSIONS, JSON.stringify(records));
+  }
+
+  /**
+   * Withdrawals List
+   */
+  static getWithdrawalRequests(): WithdrawalRequest[] {
+    try {
+      const stored = localStorage.getItem(LOCAL_STORAGE_KEYS.WITHDRAWALS);
+      return stored ? JSON.parse(stored) : INITIAL_WITHDRAWALS;
+    } catch {
+      return INITIAL_WITHDRAWALS;
+    }
+  }
+
+  static saveWithdrawalRequests(requests: WithdrawalRequest[]): void {
+    localStorage.setItem(LOCAL_STORAGE_KEYS.WITHDRAWALS, JSON.stringify(requests));
+  }
+
+  /**
+   * Request Payout / Withdrawal
+   */
+  static async createWithdrawalRequest(
+    userId: string,
+    userName: string,
+    amount: number,
+    method: 'upi' | 'bank',
+    details: WithdrawalRequest['details']
+  ): Promise<{ success: boolean; message: string; request?: WithdrawalRequest }> {
+    const settings = this.getSettings();
+    const wallet = this.getWalletBalance();
+
+    if (amount < settings.minWithdrawalAmount) {
+      return {
+        success: false,
+        message: `Minimum withdrawal amount is ₹${settings.minWithdrawalAmount}.`,
+      };
+    }
+
+    if (amount > wallet.withdrawableBalance) {
+      return {
+        success: false,
+        message: `Insufficient withdrawable balance (Available: ₹${wallet.withdrawableBalance}).`,
+      };
+    }
+
+    const newRequest: WithdrawalRequest = {
+      id: `WTH-${Math.floor(100 + Math.random() * 900)}`,
+      userId,
+      userName,
+      amount,
+      method,
+      details,
+      status: 'pending',
+      requestedAt: new Date().toISOString().replace('T', ' ').slice(0, 16),
+    };
+
+    // IMPORTANT: `wallet` here (and settings.minWithdrawalAmount above) come from
+    // localStorage, which is entirely client-controlled and NOT an authoritative
+    // balance. The real balance check now lives in the database (see migration
+    // 005_affiliate_withdrawal_balance_integrity.sql — a trigger on
+    // affiliate_withdrawals rejects any INSERT whose amount exceeds the affiliate's
+    // ledger-derived balance). This client-side check is only a fast, friendly
+    // pre-check for the UI; it must never be treated as the source of truth for
+    // whether a withdrawal is actually valid.
+
+    if (isSupabaseConfigured && supabase) {
+      const { error } = await supabase.from('affiliate_withdrawals').insert({
+        id: newRequest.id,
+        affiliate_user_id: userId,
+        amount,
+        payment_method: method,
+        status: 'PENDING',
+        transaction_reference: method === 'upi' ? details.upiId : details.accountNumber,
+      });
+
+      if (error) {
+        // The DB is authoritative — if it rejected the request (e.g. the
+        // balance-integrity trigger fired because the real ledger balance is
+        // lower than what localStorage claims), surface that honestly instead
+        // of pretending the request succeeded.
+        console.warn('Supabase affiliate_withdrawals insert error:', error.message);
+        return {
+          success: false,
+          message: error.message.includes('exceeds available')
+            ? 'Insufficient verified balance for this withdrawal amount. Your recorded, admin-approved earnings do not cover this request.'
+            : 'Could not submit withdrawal request. Please try again or contact support.',
+        };
+      }
+    }
+
+    // Only reflect the deduction/local record locally once the authoritative
+    // insert (when Supabase is configured) has actually succeeded.
+    wallet.withdrawableBalance -= amount;
+    this.updateWalletBalance(wallet);
+
+    const requests = this.getWithdrawalRequests();
+    requests.unshift(newRequest);
+    this.saveWithdrawalRequests(requests);
+
+    return {
+      success: true,
+      message: `Withdrawal request of ₹${amount} submitted successfully! Admin review in progress.`,
+      request: newRequest,
+    };
+  }
+
+  /**
+   * Automatically calculates 3-Level commissions when an order is completed
+   */
+  static processOrderCommission(
+    orderId: string,
+    orderAmount: number,
+    buyerName: string,
+    buyerEmail?: string,
+    couponCode?: string
+  ): CommissionRecord[] {
+    const refCode = this.getActiveReferralCode() || couponCode;
+    if (!refCode) return [];
+
+    const settings = this.getSettings();
+    const commissions: CommissionRecord[] = [];
+
+    // Calculate Level 1 (Direct)
+    const l1Amount = Math.round((orderAmount * settings.level1Percent) / 100);
+    commissions.push({
+      id: `COMM-${Math.floor(1000 + Math.random() * 9000)}`,
+      orderId,
+      buyerName,
+      orderAmount,
+      level: 1,
+      ratePercent: settings.level1Percent,
+      commissionAmount: l1Amount,
+      status: 'pending',
+      createdAt: new Date().toISOString().replace('T', ' ').slice(0, 16),
+    });
+
+    // Calculate Level 2
+    const l2Amount = Math.round((orderAmount * settings.level2Percent) / 100);
+    commissions.push({
+      id: `COMM-${Math.floor(1000 + Math.random() * 9000)}`,
+      orderId,
+      buyerName,
+      orderAmount,
+      level: 2,
+      ratePercent: settings.level2Percent,
+      commissionAmount: l2Amount,
+      status: 'pending',
+      createdAt: new Date().toISOString().replace('T', ' ').slice(0, 16),
+    });
+
+    // Calculate Level 3
+    const l3Amount = Math.round((orderAmount * settings.level3Percent) / 100);
+    commissions.push({
+      id: `COMM-${Math.floor(1000 + Math.random() * 9000)}`,
+      orderId,
+      buyerName,
+      orderAmount,
+      level: 3,
+      ratePercent: settings.level3Percent,
+      commissionAmount: l3Amount,
+      status: 'pending',
+      createdAt: new Date().toISOString().replace('T', ' ').slice(0, 16),
+    });
+
+    // Save to stored commissions
+    const existing = this.getCommissions();
+    this.saveCommissions([...commissions, ...existing]);
+
+    // Update wallet pending earnings
+    const wallet = this.getWalletBalance();
+    wallet.pendingEarnings += l1Amount;
+    wallet.totalEarnings += l1Amount;
+    wallet.lifetimeEarnings += l1Amount;
+    this.updateWalletBalance(wallet);
+
+    if (isSupabaseConfigured && supabase) {
+      commissions.forEach(c => {
+        supabase.from('affiliate_wallet_ledger').insert({
+          amount: c.commissionAmount,
+          entry_type: 'COMMISSION',
+          description: `Level ${c.level} commission earned for order #${orderId}`
+        }).then(({ error }) => {
+          if (error) console.warn('Supabase affiliate_wallet_ledger commission insert error:', error.message);
+        });
+      });
+    }
+
+    return commissions;
+  }
+
+  /**
+   * Fraud Logging
+   */
+  static getFraudLogs(): FraudAuditLog[] {
+    try {
+      const stored = localStorage.getItem(LOCAL_STORAGE_KEYS.FRAUD_LOGS);
+      return stored ? JSON.parse(stored) : INITIAL_FRAUD_LOGS;
+    } catch {
+      return INITIAL_FRAUD_LOGS;
+    }
+  }
+
+  static logFraud(log: Omit<FraudAuditLog, 'id' | 'timestamp'>): void {
+    const logs = this.getFraudLogs();
+    const newLog: FraudAuditLog = {
+      ...log,
+      id: `FRD-${Math.floor(100 + Math.random() * 900)}`,
+      timestamp: new Date().toISOString().replace('T', ' ').slice(0, 19),
+    };
+    logs.unshift(newLog);
+    localStorage.setItem(LOCAL_STORAGE_KEYS.FRAUD_LOGS, JSON.stringify(logs));
+  }
+
+  /**
+   * Leaderboard
+   */
+  static getLeaderboard(): LeaderboardUser[] {
+    return INITIAL_LEADERBOARD;
+  }
+
+  /**
+   * Calculates rank based on total sales volume
+   */
+  static calculateRank(totalSales: number, activeRefs: number): AffiliateRankCriteria {
+    let currentRank = DEFAULT_RANKS_CRITERIA[0];
+    for (const r of DEFAULT_RANKS_CRITERIA) {
+      if (totalSales >= r.minSalesAmount && activeRefs >= r.minActiveReferrals) {
+        currentRank = r;
+      }
+    }
+    return currentRank;
+  }
+
+  /**
+   * Generates CSV string for export
+   */
+  static exportCommissionsToCSV(): string {
+    const comms = this.getCommissions();
+    const headers = ['Commission ID', 'Order ID', 'Buyer Name', 'Order Amount (INR)', 'Level', 'Rate %', 'Earned Amount', 'Status', 'Date'];
+    const rows = comms.map(c => [
+      c.id,
+      c.orderId,
+      `"${c.buyerName}"`,
+      c.orderAmount,
+      c.level,
+      c.ratePercent,
+      c.commissionAmount,
+      c.status,
+      c.createdAt
+    ]);
+    return [headers.join(','), ...rows.map(r => r.join(','))].join('\n');
+  }
+}
