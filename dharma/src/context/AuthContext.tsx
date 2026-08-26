@@ -8,14 +8,16 @@ interface AuthContextType {
   isAuthenticated: boolean;
   isAdmin: boolean;
   mfaRequired: boolean;
-  mfaFactorId: string | null;
-  mfaChallengeId: string | null;
+  mfaEmail: string | null;
   authError: string | null;
   login: (email: string, password: string) => Promise<{ success: boolean; error?: string }>;
-  register: (fullName: string, email: string, password: string, phone: string) => Promise<{ success: boolean; error?: string }>;
+  register: (fullName: string, email: string, password: string, phone: string) => Promise<{ success: boolean; error?: string; requiresEmailConfirmation?: boolean }>;
   loginAdminStep1: (email: string, password: string) => Promise<{ success: boolean; requiresMfa?: boolean; error?: string }>;
   verifyAdminMfa: (code: string) => Promise<{ success: boolean; error?: string }>;
+  resendAdminOtp: () => Promise<{ success: boolean; error?: string }>;
   cancelAdminMfa: () => void;
+  sendPasswordResetEmail: (email: string) => Promise<{ success: boolean; error?: string }>;
+  updatePassword: (newPassword: string) => Promise<{ success: boolean; error?: string }>;
   logout: () => Promise<void>;
   updateProfile: (updated: Partial<UserProfile>) => Promise<void>;
   addAddress: (address: OrderAddress) => Promise<void>;
@@ -29,8 +31,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const [sessionToken, setSessionToken] = useState<string | null>(null);
   const [isAdmin, setIsAdmin] = useState<boolean>(false);
   const [mfaRequired, setMfaRequired] = useState<boolean>(false);
-  const [mfaFactorId, setMfaFactorId] = useState<string | null>(null);
-  const [mfaChallengeId, setMfaChallengeId] = useState<string | null>(null);
+  const [mfaEmail, setMfaEmail] = useState<string | null>(null);
   const [authError, setAuthError] = useState<string | null>(null);
 
   // Sync state with Supabase Auth session
@@ -66,7 +67,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     return () => subscription.unsubscribe();
   }, []);
 
-  const fetchUserProfileAndRole = async (userId: string, email: string) => {
+  const fetchUserProfileAndRole = async (userId: string, email: string, knownAal2?: boolean) => {
     if (!supabase) return;
 
     try {
@@ -87,11 +88,19 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       const role = userRole?.role || 'customer';
       const isUserAdmin = role === 'admin';
 
-      // 3. Verify MFA AAL level if user is admin
-      let isAal2Verified = false;
-      if (isUserAdmin) {
-        const { data: aalData } = await supabase.auth.mfa.getAuthenticatorAssuranceLevel();
-        isAal2Verified = aalData?.currentLevel === 'aal2';
+      // 3. Check whether this browser session has already passed admin email
+      // OTP verification. Replaced the old TOTP/AAL2 check per request —
+      // OTP-only is simpler for the admin to use (no authenticator app to
+      // install). Since email OTP sign-in doesn't set Supabase's own AAL2
+      // claim the way TOTP did, we track "verified this session" ourselves
+      // via sessionStorage (cleared on logout / new browser session) so a
+      // page refresh doesn't force re-entering a fresh code every time —
+      // this is a convenience gate only; the real enforcement is still the
+      // server-side is_admin() checks in RLS policies and API routes,
+      // completely unaffected by this flag.
+      let isAal2Verified = knownAal2 ?? false;
+      if (isUserAdmin && !knownAal2) {
+        isAal2Verified = sessionStorage.getItem('dharma_admin_otp_verified') === userId;
       }
 
       const userProfile: UserProfile = {
@@ -158,7 +167,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     email: string,
     password: string,
     phone: string
-  ): Promise<{ success: boolean; error?: string }> => {
+  ): Promise<{ success: boolean; error?: string; requiresEmailConfirmation?: boolean }> => {
     if (!isSupabaseConfigured || !supabase) {
       return { success: false, error: 'Authentication service is not configured.' };
     }
@@ -176,6 +185,14 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
           fullName,
           phone,
         },
+        // FIXED: without this, Supabase falls back to whatever "Site URL" is
+        // configured in Dashboard → Authentication → URL Configuration for
+        // the confirmation email's link target. If that dashboard setting is
+        // stale/wrong (e.g. still pointing at a dev/preview URL instead of
+        // the live site), clicking the confirmation link redirects
+        // somewhere broken and errors immediately — exactly the reported
+        // bug. Being explicit here removes that dependency entirely.
+        emailRedirectTo: `${window.location.origin}/email-confirmed`,
       },
     });
 
@@ -186,9 +203,24 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     if (data.session) {
       setSessionToken(data.session.access_token);
       await fetchUserProfileAndRole(data.user!.id, cleanEmail);
+      return { success: true };
     }
 
-    return { success: true };
+    // FIXED: when the Supabase project has email confirmation enabled (the
+    // default for a new project), signUp() succeeds and creates the user but
+    // returns session: null — the user is NOT actually logged in until they
+    // click the confirmation link in their email. This used to silently
+    // return { success: true } here with no way for the caller to tell the
+    // difference from a real, immediate login. The UI (AuthPage.tsx) then
+    // told the user "Account created! Welcome" and sent them straight to
+    // checkout while user/sessionToken were still null — so placing an order
+    // failed with "please sign in", even though they'd just "signed up",
+    // because they were never actually authenticated in the first place.
+    if (data.user && !data.session) {
+      return { success: true, requiresEmailConfirmation: true };
+    }
+
+    return { success: false, error: 'Registration failed. Please try again.' };
   };
 
   const loginAdminStep1 = async (
@@ -239,83 +271,134 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
     setSessionToken(data.session.access_token);
 
-    // List MFA factors for Supabase MFA verification
-    const { data: factors, error: factorsErr } = await supabase.auth.mfa.listFactors();
-    const totpFactor = factors?.totp?.find(f => f.status === 'verified') || factors?.totp?.[0];
+    // Step 2: send a one-time email code. Replaced Supabase's native TOTP
+    // MFA (which needed an authenticator app) with email OTP per request —
+    // simpler for the admin, using the same email delivery already set up
+    // for signup confirmation / password reset. shouldCreateUser: false
+    // because we've already confirmed this exact account exists above; this
+    // call should only ever send a code to an existing user, never create one.
+    const { error: otpError } = await supabase.auth.signInWithOtp({
+      email: cleanEmail,
+      options: { shouldCreateUser: false },
+    });
 
-    if (totpFactor) {
-      const { data: challenge, error: challengeErr } = await supabase.auth.mfa.challenge({
-        factorId: totpFactor.id,
-      });
-
-      if (challengeErr || !challenge) {
-        return { success: false, error: challengeErr?.message || 'Failed to initiate MFA challenge.' };
-      }
-
-      setMfaRequired(true);
-      setMfaFactorId(totpFactor.id);
-      setMfaChallengeId(challenge.id);
-      return { success: true, requiresMfa: true };
+    if (otpError) {
+      return { success: false, error: otpError.message || 'Failed to send verification code.' };
     }
 
-    // If no MFA factor enrolled, fetch profile & role to update state
-    await fetchUserProfileAndRole(data.user.id, cleanEmail);
-    return { success: true, requiresMfa: false };
+    setMfaRequired(true);
+    setMfaEmail(cleanEmail);
+    return { success: true, requiresMfa: true };
   };
 
   const verifyAdminMfa = async (code: string): Promise<{ success: boolean; error?: string }> => {
-    if (!isSupabaseConfigured || !supabase) {
-      return { success: false, error: 'Authentication service is not configured.' };
+    if (!supabase || !mfaEmail) {
+      return { success: false, error: 'No pending verification. Please log in again.' };
     }
 
-    if (!mfaFactorId || !mfaChallengeId) {
-      return { success: false, error: 'No active MFA challenge found.' };
-    }
-
-    // Server-side MFA rate limit check
+    // Server-side rate limit check — brute-force protection on OTP guesses,
+    // same as the old TOTP flow had.
     try {
       const rlRes = await fetch('/api/auth/verify-mfa', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ email: user?.email || 'admin' }),
+        body: JSON.stringify({ email: mfaEmail }),
       });
       if (rlRes.status === 429) {
         const rlData = await rlRes.json();
-        return { success: false, error: rlData.error || 'Too many MFA attempts. Account security lockout active.' };
+        return { success: false, error: rlData.error || 'Too many verification attempts. Account security lockout active.' };
       }
     } catch {
       // Continue if server rate-limiter endpoint is unreachable
     }
 
-    const { data, error } = await supabase.auth.mfa.verify({
-      factorId: mfaFactorId,
-      challengeId: mfaChallengeId,
-      code: code.trim(),
+    const { data, error } = await supabase.auth.verifyOtp({
+      email: mfaEmail,
+      token: code,
+      type: 'email',
     });
 
+    if (error || !data.session || !data.user) {
+      return { success: false, error: error?.message || 'Invalid or expired verification code.' };
+    }
+
+    setSessionToken(data.session.access_token);
+    // Remember that this browser session has passed OTP verification, keyed
+    // to this specific user id, so a page refresh doesn't force re-entering
+    // a fresh code every time (see the comment in fetchUserProfileAndRole).
+    sessionStorage.setItem('dharma_admin_otp_verified', data.user.id);
+
+    setMfaRequired(false);
+    setMfaEmail(null);
+    setIsAdmin(true);
+
+    await fetchUserProfileAndRole(data.user.id, data.user.email || mfaEmail, true);
+
+    return { success: true };
+  };
+
+  const resendAdminOtp = async (): Promise<{ success: boolean; error?: string }> => {
+    if (!supabase || !mfaEmail) {
+      return { success: false, error: 'No pending verification. Please log in again.' };
+    }
+    const { error } = await supabase.auth.signInWithOtp({
+      email: mfaEmail,
+      options: { shouldCreateUser: false },
+    });
     if (error) {
       return { success: false, error: error.message };
     }
-
-    setMfaRequired(false);
-    setMfaFactorId(null);
-    setMfaChallengeId(null);
-    setIsAdmin(true);
-
-    if (user) {
-      await fetchUserProfileAndRole(user.id, user.email);
-    }
-
     return { success: true };
   };
 
   const cancelAdminMfa = () => {
     setMfaRequired(false);
-    setMfaFactorId(null);
-    setMfaChallengeId(null);
+    setMfaEmail(null);
     if (supabase) {
       supabase.auth.signOut().catch(console.error);
     }
+  };
+
+  // NOTE: "Forgot Password" on AuthPage.tsx previously did nothing but show a
+  // fake "email sent" message — no actual email was ever sent, no reset link
+  // ever generated. This is the real implementation.
+  const sendPasswordResetEmail = async (email: string): Promise<{ success: boolean; error?: string }> => {
+    if (!isSupabaseConfigured || !supabase) {
+      return { success: false, error: 'Authentication service is not configured.' };
+    }
+    const cleanEmail = email.trim().toLowerCase();
+    if (!cleanEmail) {
+      return { success: false, error: 'Please enter your email address.' };
+    }
+
+    const { error } = await supabase.auth.resetPasswordForEmail(cleanEmail, {
+      redirectTo: `${window.location.origin}/reset-password`,
+    });
+
+    if (error) {
+      // Supabase intentionally doesn't say "email not found" for this call
+      // (prevents leaking which emails are registered) — surface real errors
+      // (rate limiting etc.) but keep a generic message otherwise.
+      return { success: false, error: error.message };
+    }
+    return { success: true };
+  };
+
+  // NOTE: there was no way at all for a logged-in customer to change their
+  // password — CustomerDashboardPage.tsx only ever let them edit name/phone.
+  const updatePassword = async (newPassword: string): Promise<{ success: boolean; error?: string }> => {
+    if (!isSupabaseConfigured || !supabase) {
+      return { success: false, error: 'Authentication service is not configured.' };
+    }
+    if (!newPassword || newPassword.length < 6) {
+      return { success: false, error: 'Password must be at least 6 characters long.' };
+    }
+
+    const { error } = await supabase.auth.updateUser({ password: newPassword });
+    if (error) {
+      return { success: false, error: error.message };
+    }
+    return { success: true };
   };
 
   const logout = async () => {
@@ -326,6 +409,8 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     setSessionToken(null);
     setIsAdmin(false);
     setMfaRequired(false);
+    setMfaEmail(null);
+    sessionStorage.removeItem('dharma_admin_otp_verified');
   };
 
   const updateProfile = async (updated: Partial<UserProfile>) => {
@@ -388,14 +473,16 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         isAuthenticated: Boolean(user),
         isAdmin,
         mfaRequired,
-        mfaFactorId,
-        mfaChallengeId,
+        mfaEmail,
         authError,
         login,
         register,
         loginAdminStep1,
         verifyAdminMfa,
+        resendAdminOtp,
         cancelAdminMfa,
+        sendPasswordResetEmail,
+        updatePassword,
         logout,
         updateProfile,
         addAddress,

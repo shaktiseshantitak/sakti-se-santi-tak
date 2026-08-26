@@ -279,6 +279,23 @@ app.post('/api/orders/create', async (req: Request, res: Response) => {
 
     const orderNumber = `DH-${new Date().getFullYear()}-${Date.now().toString().slice(-6)}`;
 
+    // Validate the referral code, if any, against real affiliate accounts —
+    // previously this was read from the request and then silently discarded
+    // (never stored, never used for anything), so referral commission could
+    // never actually be calculated or credited for any order.
+    let validatedReferralCode: string | null = null;
+    if (referralCode) {
+      const { data: refAccount } = await supabaseServer
+        .from('affiliate_accounts')
+        .select('referral_code')
+        .eq('referral_code', String(referralCode).toUpperCase().trim())
+        .eq('status', 'active')
+        .maybeSingle();
+      if (refAccount) {
+        validatedReferralCode = refAccount.referral_code;
+      }
+    }
+
     // Database Atomic Order Creation
     const { data: dbOrder, error: orderErr } = await supabaseServer
       .from('orders')
@@ -295,6 +312,7 @@ app.post('/api/orders/create', async (req: Request, res: Response) => {
         payment_status: paymentMethod === 'COD' ? 'Pending' : 'Pending Verification',
         order_status: 'Processing',
         coupon_code_used: couponCode || null,
+        referral_code_used: validatedReferralCode,
         created_at: new Date().toISOString(),
       }])
       .select('id')
@@ -548,6 +566,12 @@ app.post('/api/payment/verify', async (req: Request, res: Response) => {
       })
       .eq('id', orderId);
 
+    // NOTE: real 3-level affiliate commission crediting happens automatically
+    // via a database trigger (migration 010, trg_credit_affiliate_commission)
+    // whenever payment_status transitions to 'Paid' — not called explicitly
+    // here, so it also covers COD orders marked paid from the admin panel and
+    // the Razorpay webhook path, with one single, idempotent mechanism.
+
     // Audit log payment entry
     await supabaseServer
       .from('payments')
@@ -646,6 +670,8 @@ app.post('/api/payment/webhook', async (req: Request, res: Response) => {
               updated_at: new Date().toISOString(),
             })
             .eq('id', orderId);
+          // Commission crediting handled by the trg_credit_affiliate_commission
+          // trigger (migration 010) — fires automatically on this update.
         }
       }
     }

@@ -18,7 +18,9 @@ import {
   Users,
   Video,
   Radio,
-  ExternalLink
+  ExternalLink,
+  Sun,
+  Heart
 } from 'lucide-react';
 import { Book, Category } from '../../types';
 
@@ -42,6 +44,8 @@ interface MobileMenuProps {
   siteSettings?: any;
   isLive?: boolean;
   onOpenLiveStream?: () => void;
+  toggleTheme: () => void;
+  wishlistCount: number;
 }
 
 export const MobileMenu: React.FC<MobileMenuProps> = ({
@@ -64,6 +68,8 @@ export const MobileMenu: React.FC<MobileMenuProps> = ({
   siteSettings,
   isLive,
   onOpenLiveStream,
+  toggleTheme,
+  wishlistCount,
 }) => {
   const [expandedSubmenu, setExpandedSubmenu] = useState<string | null>(null);
   const [isSearchFocused, setIsSearchFocused] = useState<boolean>(false);
@@ -464,18 +470,61 @@ export const MobileMenu: React.FC<MobileMenuProps> = ({
               </button>
             )}
 
+            {/* Wishlist, Language, and Theme — previously only in the desktop
+                navbar; on mobile they used to compete for space with the
+                hamburger button itself, sometimes pushing it off-screen.
+                Moved here so they're still reachable on mobile, just one tap
+                further in. */}
             <button
-              onClick={() => handleNav(isAdmin ? 'admin' : 'admin-login')}
-              className="w-full text-left py-2.5 px-3 bg-[#8B1E3F] hover:bg-[#66122C] text-amber-100 font-extrabold rounded-xl mt-2 flex items-center justify-between shadow-sm border border-[#D4AF37]/50 transition-all"
+              onClick={() => handleNav('wishlist')}
+              className={`w-full text-left py-2.5 px-3 rounded-xl flex items-center justify-between transition-all ${
+                currentPage === 'wishlist'
+                  ? 'bg-[#8B1E3F] text-amber-100 font-extrabold'
+                  : 'bg-[#FFF8EE] hover:bg-[#F8F4E8] text-[#4A2C17] border border-[#D4AF37]/40'
+              }`}
             >
-              <span className="flex items-center gap-2">
-                <ShieldCheck className="w-4 h-4 text-[#D4AF37]" />
-                <span>{isAdmin ? 'एडमिन मैनेजमेंट (Active)' : 'एडमिन पोर्टल लॉगिन'}</span>
+              <span className="flex items-center gap-2 font-bold">
+                <Heart className="w-4 h-4 text-[#8B1E3F]" /> मेरी विशलिस्ट (Wishlist)
               </span>
-              <span className="text-[10px] bg-[#D4AF37] text-[#3A1F0D] font-black px-2 py-0.5 rounded">
-                {isAdmin ? 'Open →' : 'Login →'}
-              </span>
+              {wishlistCount > 0 && (
+                <span className="text-[10px] bg-[#D4AF37] text-[#3A1F0D] font-black px-1.5 py-0.5 rounded-full">
+                  {wishlistCount}
+                </span>
+              )}
             </button>
+
+            <div className="flex gap-2">
+              <button
+                onClick={toggleLanguage}
+                className="flex-1 py-2.5 px-3 rounded-xl bg-[#FFF8EE] hover:bg-[#F8F4E8] text-[#4A2C17] border border-[#D4AF37]/40 font-bold flex items-center justify-center gap-1.5"
+              >
+                <Globe className="w-4 h-4 text-[#8B1E3F]" />
+                {language === 'hi' ? 'हिंदी | EN' : 'EN | हिंदी'}
+              </button>
+              <button
+                onClick={toggleTheme}
+                className="flex-1 py-2.5 px-3 rounded-xl bg-[#FFF8EE] hover:bg-[#F8F4E8] text-[#4A2C17] border border-[#D4AF37]/40 font-bold flex items-center justify-center gap-1.5"
+              >
+                <Sun className="w-4 h-4 text-[#8B1E3F]" /> थीम
+              </button>
+            </div>
+
+            {/* Same as Navbar.tsx — only show this to an already-authenticated
+                admin; the public "Admin Portal Login" entry was removed. */}
+            {isAdmin && (
+              <button
+                onClick={() => handleNav('admin')}
+                className="w-full text-left py-2.5 px-3 bg-[#8B1E3F] hover:bg-[#66122C] text-amber-100 font-extrabold rounded-xl mt-2 flex items-center justify-between shadow-sm border border-[#D4AF37]/50 transition-all"
+              >
+                <span className="flex items-center gap-2">
+                  <ShieldCheck className="w-4 h-4 text-[#D4AF37]" />
+                  <span>एडमिन मैनेजमेंट (Active)</span>
+                </span>
+                <span className="text-[10px] bg-[#D4AF37] text-[#3A1F0D] font-black px-2 py-0.5 rounded">
+                  Open →
+                </span>
+              </button>
+            )}
           </div>
 
           {/* Quick Contact Helpline Footer */}

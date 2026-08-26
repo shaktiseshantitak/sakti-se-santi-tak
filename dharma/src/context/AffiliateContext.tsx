@@ -66,7 +66,18 @@ export const AffiliateProvider: React.FC<{ children: React.ReactNode }> = ({ chi
     const params = new URLSearchParams(window.location.search);
     const ref = params.get('ref') || params.get('aff');
     if (ref) {
-      AffiliateService.handleReferralClick(ref, user?.email);
+      const wasNewClick = AffiliateService.handleReferralClick(ref, user?.email);
+      // Record a REAL click in the database (see migration 010,
+      // record_affiliate_click) — previously "clicks" were purely a fake
+      // localStorage-only number shown on the dashboard, never an actual
+      // count of anything that happened. This works for logged-out visitors
+      // too, since it's a public RPC.
+      if (wasNewClick && isSupabaseConfigured && supabase) {
+        supabase.rpc('record_affiliate_click', { p_referral_code: ref.toUpperCase().trim() })
+          .then(({ error }) => {
+            if (error) console.warn('record_affiliate_click error:', error.message);
+          });
+      }
     }
   }, [user?.email]);
 
@@ -75,10 +86,18 @@ export const AffiliateProvider: React.FC<{ children: React.ReactNode }> = ({ chi
       // Sync affiliate account
       supabase.from('affiliate_accounts').select('*').eq('user_id', user.id).maybeSingle().then(({ data: accData, error }) => {
         if (!accData && !error) {
-          // Create account row if missing
+          // Create account row if missing. referred_by_code links this new
+          // affiliate to whoever's referral link brought them here (if any)
+          // — this is what makes the 3-level team structure real instead of
+          // fabricated: without recording this at account-creation time,
+          // there would be no way to ever reconstruct who referred whom.
+          // Guard against self-referral (defense in depth alongside the
+          // check already in AffiliateService.handleReferralClick).
+          const activeRef = AffiliateService.getActiveReferralCode();
           supabase.from('affiliate_accounts').insert({
             user_id: user.id,
             referral_code: referralCode,
+            referred_by_code: (activeRef && activeRef !== referralCode) ? activeRef : null,
             status: 'active'
           }).then(() => {});
         }
@@ -132,12 +151,53 @@ export const AffiliateProvider: React.FC<{ children: React.ReactNode }> = ({ chi
           });
         }
       });
+
+      // Real dashboard stats (clicks, orders, conversion rate) — computed
+      // from actual affiliate_clicks and orders rows via migration 010's
+      // get_affiliate_dashboard RPC, not the old localStorage-only numbers.
+      supabase.rpc('get_affiliate_dashboard', { p_user_id: user.id }).then(({ data, error }) => {
+        if (!error && data && !data.error) {
+          setStats({
+            totalClicks: Number(data.totalClicks || 0),
+            // True unique-visitor deduplication would need session/cookie
+            // tracking, which affiliate_clicks doesn't do (each row is one
+            // click, not one visitor) — using total clicks as a reasonable
+            // stand-in rather than inventing a fake number.
+            uniqueVisitors: Number(data.totalClicks || 0),
+            totalSignups: Number(data.teamSize || 0),
+            totalOrders: Number(data.totalOrders || 0),
+            conversionRate: Number(data.conversionRate || 0),
+            totalIncome: Number(data.totalEarnings || 0),
+            monthlyIncome: Number(data.totalEarnings || 0),
+          });
+        }
+      });
+
+      // Real 3-level team — walked from actual referred_by_code chains via
+      // migration 010's get_affiliate_team RPC, not fabricated demo members.
+      supabase.rpc('get_affiliate_team', { p_user_id: user.id }).then(({ data, error }) => {
+        if (!error && Array.isArray(data)) {
+          const mappedTeam: TeamMember[] = data.map((row: any) => ({
+            id: row.member_user_id,
+            name: row.member_name,
+            email: row.member_email || '',
+            level: row.level,
+            joinDate: row.joined_at ? String(row.joined_at).split('T')[0] : '',
+            totalSales: 0,
+            totalCommissionsEarned: 0,
+            status: 'active',
+          }));
+          setTeam(mappedTeam);
+        }
+      });
     }
 
     // Always keep local state fresh
     setWallet(prev => (isSupabaseConfigured ? prev : AffiliateService.getWalletBalance()));
-    setStats(AffiliateService.getDashboardStats());
-    setTeam(AffiliateService.getTeamMembers());
+    if (!isSupabaseConfigured) {
+      setStats(AffiliateService.getDashboardStats());
+      setTeam(AffiliateService.getTeamMembers());
+    }
     setCommissions(AffiliateService.getCommissions());
     if (!isSupabaseConfigured) setWithdrawals(AffiliateService.getWithdrawalRequests());
     setFraudLogs(AffiliateService.getFraudLogs());

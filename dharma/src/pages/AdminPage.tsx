@@ -53,11 +53,10 @@ export const AdminPage: React.FC<AdminPageProps> = ({ onNavigate, onOpenLiveStud
   // never defined anywhere in AuthContext (not in the interface, not in the
   // provider's returned value) — destructuring it from useAuth() always produced
   // `undefined`, so `!isAdminTotpVerified` was always true and this screen
-  // permanently blocked every admin from the panel, MFA-verified or not.
-  // `isAdmin` already only becomes true post-AAL2/TOTP verification (see
-  // AuthContext.tsx: fetchUserProfileAndRole sets it from `isAal2Verified`, and
-  // verifyAdminMfa sets it true only after a successful TOTP challenge), so the
-  // MFA requirement is already encoded in `isAdmin` itself.
+  // permanently blocked every admin from the panel, verified or not.
+  // `isAdmin` already only becomes true post-OTP verification (see
+  // AuthContext.tsx: fetchUserProfileAndRole and verifyAdminMfa), so the
+  // 2-step requirement is already encoded in `isAdmin` itself.
   if (!isAdmin) {
     return (
       <div className="py-16 bg-[#F8F4E8] text-[#4A2C17] min-h-screen flex items-center justify-center px-4">
@@ -66,10 +65,10 @@ export const AdminPage: React.FC<AdminPageProps> = ({ onNavigate, onOpenLiveStud
             <Lock className="w-8 h-8" />
           </div>
           <h2 className="font-serif text-2xl font-bold text-[#8B1E3F]">
-            Admin Security TOTP Lock
+            Admin Security Lock
           </h2>
           <p className="text-xs text-[#6E4E37] font-medium">
-            Multi-Factor Authenticator (TOTP) 2-Step verification is required to access the Master Executive Control Panel.
+            Email OTP 2-Step verification is required to access the Master Executive Control Panel.
           </p>
           <div className="pt-2 space-y-2">
             <button
@@ -77,7 +76,7 @@ export const AdminPage: React.FC<AdminPageProps> = ({ onNavigate, onOpenLiveStud
               className="w-full bg-[#D4AF37] hover:bg-amber-400 text-[#3A1F0D] font-extrabold text-xs py-3 rounded-xl shadow border border-amber-200 flex items-center justify-center gap-2"
             >
               <ShieldCheck className="w-4 h-4" />
-              <span>Authenticate with 2-Step TOTP</span>
+              <span>Authenticate with Email OTP</span>
             </button>
             <button
               onClick={() => onNavigate('home')}

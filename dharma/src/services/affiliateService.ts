@@ -88,83 +88,29 @@ export const DEFAULT_RANKS_CRITERIA: AffiliateRankCriteria[] = [
   },
 ];
 
-// Initial mock data for quick immediate preview
-const INITIAL_DEMO_WALLET: WalletBalance = {
-  totalEarnings: 18450,
-  pendingEarnings: 3200,
-  withdrawableBalance: 12250,
-  lifetimeEarnings: 21650,
+// FIXED: this file used to default every brand-new affiliate (0 real clicks,
+// 0 real sales) straight to fabricated demo numbers — impressive-looking
+// fake stats (₹18,450 earnings, 1,420 clicks, 32 orders, a pre-built 3-level
+// team) presented as if they were the user's own real, current data. That
+// was reported as "dummy data instead of real data" on the Affiliate &
+// Referral Portal. A brand-new affiliate should see honest zeros / an empty
+// team until they actually generate real activity.
+const EMPTY_WALLET: WalletBalance = {
+  totalEarnings: 0,
+  pendingEarnings: 0,
+  withdrawableBalance: 0,
+  lifetimeEarnings: 0,
 };
 
-const INITIAL_DEMO_STATS: AffiliateDashboardStats = {
-  totalClicks: 1420,
-  uniqueVisitors: 980,
-  totalSignups: 48,
-  totalOrders: 32,
-  conversionRate: 3.26,
-  totalIncome: 18450,
-  monthlyIncome: 6450,
+const EMPTY_STATS: AffiliateDashboardStats = {
+  totalClicks: 0,
+  uniqueVisitors: 0,
+  totalSignups: 0,
+  totalOrders: 0,
+  conversionRate: 0,
+  totalIncome: 0,
+  monthlyIncome: 0,
 };
-
-const INITIAL_DEMO_TEAM: TeamMember[] = [
-  {
-    id: 'team-101',
-    name: 'Pandit Rameshwar Shastri',
-    email: 'rameshwar@dharmabooks.pro',
-    phone: '+91 98765 11111',
-    level: 1,
-    joinDate: '2026-01-15',
-    totalSales: 45000,
-    totalCommissionsEarned: 4500,
-    status: 'active',
-    subMembers: [
-      {
-        id: 'team-201',
-        name: 'Vidwan Kunjesh Sharma',
-        email: 'kunjesh@dharmabooks.pro',
-        level: 2,
-        joinDate: '2026-02-01',
-        totalSales: 22000,
-        totalCommissionsEarned: 1100,
-        status: 'active',
-        subMembers: [
-          {
-            id: 'team-301',
-            name: 'Acharya Poonam Sharma',
-            email: 'poonam@dharmabooks.pro',
-            level: 3,
-            joinDate: '2026-03-10',
-            totalSales: 12000,
-            totalCommissionsEarned: 300,
-            status: 'active',
-          },
-        ],
-      },
-    ],
-  },
-  {
-    id: 'team-102',
-    name: 'Sadhvi Sunita Devi',
-    email: 'sunita@dharmabooks.pro',
-    phone: '+91 98111 22222',
-    level: 1,
-    joinDate: '2026-02-20',
-    totalSales: 28000,
-    totalCommissionsEarned: 2800,
-    status: 'active',
-  },
-  {
-    id: 'team-103',
-    name: 'Shri Anand Prakash',
-    email: 'anand@dharmabooks.pro',
-    phone: '+91 99888 33333',
-    level: 1,
-    joinDate: '2026-04-05',
-    totalSales: 8500,
-    totalCommissionsEarned: 850,
-    status: 'active',
-  },
-];
 
 const INITIAL_COMMISSIONS: CommissionRecord[] = [
   {
@@ -320,9 +266,9 @@ export class AffiliateService {
   static getWalletBalance(): WalletBalance {
     try {
       const stored = localStorage.getItem(LOCAL_STORAGE_KEYS.WALLETS);
-      return stored ? JSON.parse(stored) : INITIAL_DEMO_WALLET;
+      return stored ? JSON.parse(stored) : EMPTY_WALLET;
     } catch {
-      return INITIAL_DEMO_WALLET;
+      return EMPTY_WALLET;
     }
   }
 
@@ -336,9 +282,9 @@ export class AffiliateService {
   static getDashboardStats(): AffiliateDashboardStats {
     try {
       const stored = localStorage.getItem('dharma_aff_stats');
-      return stored ? JSON.parse(stored) : INITIAL_DEMO_STATS;
+      return stored ? JSON.parse(stored) : EMPTY_STATS;
     } catch {
-      return INITIAL_DEMO_STATS;
+      return EMPTY_STATS;
     }
   }
 
@@ -348,9 +294,9 @@ export class AffiliateService {
   static getTeamMembers(): TeamMember[] {
     try {
       const stored = localStorage.getItem(LOCAL_STORAGE_KEYS.TEAM);
-      return stored ? JSON.parse(stored) : INITIAL_DEMO_TEAM;
+      return stored ? JSON.parse(stored) : [];
     } catch {
-      return INITIAL_DEMO_TEAM;
+      return [];
     }
   }
 

@@ -1,18 +1,24 @@
 import React, { useState } from 'react';
-import { User, Package, BookOpen, MapPin, Key, LogOut, Download, FileText, CheckCircle2, Award, Share2 } from 'lucide-react';
+import { User, Package, BookOpen, MapPin, Key, LogOut, Download, FileText, CheckCircle2, Award, Share2, Plus, Trash2 } from 'lucide-react';
 import { Breadcrumbs } from '../components/common/Breadcrumbs';
 import { useAuth } from '../context/AuthContext';
 import { useBooks } from '../context/BookContext';
 import { AffiliatePortal } from '../components/affiliate/AffiliatePortal';
 import { AffiliateMetricsWidget } from '../components/affiliate/AffiliateMetricsWidget';
+import { OrderAddress } from '../types';
 
 interface CustomerDashboardPageProps {
   onNavigate: (page: string, params?: Record<string, any>) => void;
   initialTab?: 'orders' | 'library' | 'profile' | 'addresses' | 'affiliate';
 }
 
+const BLANK_ADDRESS: OrderAddress = {
+  fullName: '', phone: '', email: '', addressLine1: '', addressLine2: '',
+  city: '', state: '', pincode: '', country: 'India', isDefault: false,
+};
+
 export const CustomerDashboardPage: React.FC<CustomerDashboardPageProps> = ({ onNavigate, initialTab = 'affiliate' }) => {
-  const { user, logout, updateProfile } = useAuth();
+  const { user, logout, updateProfile, updatePassword, addAddress, removeAddress } = useAuth();
   const { orders, books } = useBooks();
 
   const [activeTab, setActiveTab] = useState<'orders' | 'library' | 'profile' | 'addresses' | 'affiliate'>(initialTab);
@@ -20,6 +26,22 @@ export const CustomerDashboardPage: React.FC<CustomerDashboardPageProps> = ({ on
   const [fullName, setFullName] = useState<string>(user?.fullName || '');
   const [phone, setPhone] = useState<string>(user?.phone || '');
   const [saveSuccess, setSaveSuccess] = useState<boolean>(false);
+
+  // NOTE: there was previously no way at all for a logged-in customer to
+  // change their password from this dashboard.
+  const [newPassword, setNewPassword] = useState('');
+  const [confirmNewPassword, setConfirmNewPassword] = useState('');
+  const [passwordMsg, setPasswordMsg] = useState<{ type: 'error' | 'success'; text: string } | null>(null);
+  const [passwordSaving, setPasswordSaving] = useState(false);
+
+  // NOTE: "Saved Delivery Addresses" previously showed one hardcoded fake
+  // address ("Acharya Rahul Sharma", a Varanasi address) to every single
+  // customer, with no connection to their real saved addresses at all —
+  // even though AuthContext already had working addAddress/removeAddress
+  // functions wired to the database; this page just never used them.
+  const [showAddForm, setShowAddForm] = useState(false);
+  const [newAddress, setNewAddress] = useState<OrderAddress>(BLANK_ADDRESS);
+  const [addressSaving, setAddressSaving] = useState(false);
 
   const userOrders = orders.filter(o => {
     if (!user) return false;
@@ -38,6 +60,45 @@ export const CustomerDashboardPage: React.FC<CustomerDashboardPageProps> = ({ on
     updateProfile({ fullName, phone });
     setSaveSuccess(true);
     setTimeout(() => setSaveSuccess(false), 3000);
+  };
+
+  const handleChangePassword = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setPasswordMsg(null);
+
+    if (newPassword.length < 6) {
+      setPasswordMsg({ type: 'error', text: 'पासवर्ड कम से कम 6 अक्षरों का होना चाहिए। / Password must be at least 6 characters.' });
+      return;
+    }
+    if (newPassword !== confirmNewPassword) {
+      setPasswordMsg({ type: 'error', text: 'दोनों पासवर्ड मेल नहीं खाते। / Passwords do not match.' });
+      return;
+    }
+
+    setPasswordSaving(true);
+    const result = await updatePassword(newPassword);
+    setPasswordSaving(false);
+
+    if (result.success) {
+      setPasswordMsg({ type: 'success', text: 'पासवर्ड सफलतापूर्वक बदल गया! / Password changed successfully!' });
+      setNewPassword('');
+      setConfirmNewPassword('');
+    } else {
+      setPasswordMsg({ type: 'error', text: result.error || 'कुछ गड़बड़ हुई। / Something went wrong.' });
+    }
+  };
+
+  const handleAddAddress = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setAddressSaving(true);
+    await addAddress(newAddress);
+    setAddressSaving(false);
+    setNewAddress(BLANK_ADDRESS);
+    setShowAddForm(false);
+  };
+
+  const handleRemoveAddress = async (index: number) => {
+    await removeAddress(index);
   };
 
   return (
@@ -252,6 +313,45 @@ export const CustomerDashboardPage: React.FC<CustomerDashboardPageProps> = ({ on
                     {saveSuccess ? '✓ Saved Successfully' : 'Update Profile'}
                   </button>
                 </form>
+
+                <div className="border-t border-[#D4AF37]/30 pt-5 mt-2">
+                  <h3 className="font-serif font-bold text-lg text-[#8B1E3F] mb-3 flex items-center gap-2">
+                    <Key className="w-4 h-4" /> Change Password
+                  </h3>
+                  <form onSubmit={handleChangePassword} className="space-y-4 text-xs max-w-md">
+                    <div>
+                      <label className="block font-bold text-[#8B1E3F] mb-1">New Password</label>
+                      <input
+                        type="password"
+                        value={newPassword}
+                        onChange={e => setNewPassword(e.target.value)}
+                        placeholder="At least 6 characters"
+                        className="w-full px-3 py-2 bg-[#F8F4E8] border border-[#D4AF37]/40 rounded-xl text-[#4A2C17] focus:outline-none focus:ring-2 focus:ring-[#8B1E3F]"
+                      />
+                    </div>
+                    <div>
+                      <label className="block font-bold text-[#8B1E3F] mb-1">Confirm New Password</label>
+                      <input
+                        type="password"
+                        value={confirmNewPassword}
+                        onChange={e => setConfirmNewPassword(e.target.value)}
+                        className="w-full px-3 py-2 bg-[#F8F4E8] border border-[#D4AF37]/40 rounded-xl text-[#4A2C17] focus:outline-none focus:ring-2 focus:ring-[#8B1E3F]"
+                      />
+                    </div>
+                    {passwordMsg && (
+                      <p className={`text-xs rounded-lg px-3 py-2 border ${passwordMsg.type === 'success' ? 'text-emerald-700 bg-emerald-50 border-emerald-200' : 'text-rose-700 bg-rose-50 border-rose-200'}`}>
+                        {passwordMsg.text}
+                      </p>
+                    )}
+                    <button
+                      type="submit"
+                      disabled={passwordSaving}
+                      className="bg-[#8B1E3F] hover:bg-[#66122C] text-amber-100 font-bold text-xs px-5 py-2.5 rounded-xl shadow transition-colors disabled:opacity-60"
+                    >
+                      {passwordSaving ? 'Saving...' : 'Change Password'}
+                    </button>
+                  </form>
+                </div>
               </div>
             )}
 

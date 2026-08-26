@@ -226,10 +226,18 @@ export const Navbar: React.FC<NavbarProps> = ({ onNavigate, currentPage, onOpenL
 
         {/* Right Action Menu Items */}
         <div className="flex items-center gap-1 sm:gap-2 shrink-0">
-          {/* Live Stream / Satsang Button */}
+          {/* Live Stream / Satsang Button — hidden on the smallest screens;
+              moved into the mobile hamburger menu instead (see
+              MobileMenu.tsx). Previously this sat in the same row as 5 other
+              buttons (language, theme, wishlist, cart, hamburger), which on
+              a narrow phone screen left too little room for all of them —
+              the hamburger menu (the most important one, since it's the
+              only way to reach the rest of site navigation on mobile) would
+              overflow or become hard to tap. Reference: competitor sites
+              keep only 1-2 icons + the hamburger visible on mobile. */}
           <button
             onClick={onOpenLiveStream}
-            className={`p-1.5 sm:p-2 rounded-xl transition-all flex items-center gap-1 text-[11px] sm:text-xs font-bold shrink-0 ${
+            className={`hidden md:flex p-1.5 sm:p-2 rounded-xl transition-all items-center gap-1 text-[11px] sm:text-xs font-bold shrink-0 ${
               isLive
                 ? 'bg-amber-500 text-[#3A1F0D] shadow-sm shadow-amber-500/30 animate-pulse'
                 : 'text-amber-100 bg-[#66122C] hover:bg-[#500D20] border border-[#D4AF37]/40'
@@ -241,10 +249,10 @@ export const Navbar: React.FC<NavbarProps> = ({ onNavigate, currentPage, onOpenL
             <span className="hidden sm:inline">{isLive ? '🔴 LIVE' : 'सत्संग'}</span>
           </button>
 
-          {/* Language Switcher (Hindi / English Support) */}
+          {/* Language Switcher — desktop only now, moved into mobile menu */}
           <button
             onClick={toggleLanguage}
-            className="px-1.5 sm:px-2.5 py-1 sm:py-1.5 rounded-xl text-[10px] sm:text-xs font-extrabold flex items-center gap-1 bg-[#D4AF37]/20 hover:bg-[#D4AF37]/30 text-[#F4E285] border border-[#D4AF37]/40 transition-all active:scale-95 shrink-0"
+            className="hidden md:flex px-1.5 sm:px-2.5 py-1 sm:py-1.5 rounded-xl text-[10px] sm:text-xs font-extrabold items-center gap-1 bg-[#D4AF37]/20 hover:bg-[#D4AF37]/30 text-[#F4E285] border border-[#D4AF37]/40 transition-all active:scale-95 shrink-0"
             title="भाषा बदलें / Change Language"
             aria-label="Toggle language between Hindi and English"
           >
@@ -252,20 +260,20 @@ export const Navbar: React.FC<NavbarProps> = ({ onNavigate, currentPage, onOpenL
             <span>{language === 'hi' ? 'हिंदी|EN' : 'EN|हिंदी'}</span>
           </button>
 
-          {/* Light / Theme Switch Indicator (Maintained standard) */}
+          {/* Theme toggle — desktop only now, moved into mobile menu */}
           <button
             onClick={toggleTheme}
-            className="p-1.5 sm:p-2 rounded-xl text-amber-200 hover:bg-[#66122C] transition-colors shrink-0"
+            className="hidden md:flex p-1.5 sm:p-2 rounded-xl text-amber-200 hover:bg-[#66122C] transition-colors shrink-0"
             title="Sacred Luxury Theme"
             aria-label="Toggle theme mode"
           >
             <Sun className="w-4 h-4 sm:w-5 sm:h-5 text-[#F4E285]" aria-hidden="true" />
           </button>
 
-          {/* Wishlist Link */}
+          {/* Wishlist — desktop only now, moved into mobile menu */}
           <button
             onClick={() => onNavigate('wishlist')}
-            className="relative p-1.5 sm:p-2 rounded-xl text-amber-100 hover:bg-[#66122C] transition-colors shrink-0"
+            className="hidden md:flex relative p-1.5 sm:p-2 rounded-xl text-amber-100 hover:bg-[#66122C] transition-colors shrink-0"
             title="My Wishlist"
             aria-label={`Wishlist with ${wishlistBookIds.length} saved items`}
           >
@@ -277,22 +285,27 @@ export const Navbar: React.FC<NavbarProps> = ({ onNavigate, currentPage, onOpenL
             )}
           </button>
 
-          {/* Admin Panel / Admin Login Quick Button */}
-          <button
-            onClick={() => onNavigate(isAdmin ? 'admin' : 'admin-login')}
-            className={`px-2 sm:px-3 py-1.5 rounded-xl text-[11px] sm:text-xs font-extrabold transition-all flex items-center gap-1 sm:gap-1.5 shrink-0 ${
-              isAdmin
-                ? 'bg-[#D4AF37] text-[#3A1F0D] hover:bg-amber-400 border border-amber-200 shadow-sm'
-                : 'bg-[#66122C] text-amber-200 hover:bg-[#500D20] border border-[#D4AF37]/40'
-            }`}
-            title={isAdmin ? "Open Admin Dashboard" : "Admin Portal Login"}
-            aria-label="Admin Portal Login"
-          >
-            <ShieldCheck className="w-3.5 h-3.5 sm:w-4 sm:h-4 text-[#F4E285] shrink-0" />
-            <span className="hidden xs:inline">{isAdmin ? 'एडमिन पैनल' : 'एडमिन लॉगिन'}</span>
-          </button>
+          {/* Admin Panel Quick Button — only shown to an already-authenticated
+              admin, as a shortcut to their dashboard. The "Admin Login" link
+              for logged-out visitors used to be shown here too, publicly
+              advertising that an admin panel exists and inviting anyone to
+              go find it — removed per bug report; admin login now only has
+              its own unlisted URL (see App.tsx's PATH_TO_PAGE), not a public
+              nav entry. */}
+          {isAdmin && (
+            <button
+              onClick={() => onNavigate('admin')}
+              className="hidden sm:flex px-2 sm:px-3 py-1.5 rounded-xl text-[11px] sm:text-xs font-extrabold transition-all items-center gap-1 sm:gap-1.5 shrink-0 bg-[#D4AF37] text-[#3A1F0D] hover:bg-amber-400 border border-amber-200 shadow-sm"
+              title="Open Admin Dashboard"
+              aria-label="Open Admin Dashboard"
+            >
+              <ShieldCheck className="w-3.5 h-3.5 sm:w-4 sm:h-4 text-[#F4E285] shrink-0" />
+              <span className="hidden xs:inline">एडमिन पैनल</span>
+            </button>
+          )}
 
-          {/* Cart Drawer Trigger */}
+          {/* Cart Drawer Trigger — always visible on mobile too, this is a
+              standard expected e-commerce icon */}
           <button
             onClick={() => setIsCartOpen(true)}
             className="relative p-1.5 sm:p-2 rounded-xl text-[#3A1F0D] bg-[#D4AF37] hover:bg-amber-300 transition-colors flex items-center gap-1.5 shrink-0 font-bold shadow-sm"
@@ -310,7 +323,9 @@ export const Navbar: React.FC<NavbarProps> = ({ onNavigate, currentPage, onOpenL
             )}
           </button>
 
-          {/* Mobile Menu Toggle Button */}
+          {/* Mobile Menu Toggle Button — now one of only two icons visible on
+              a phone screen (alongside Cart), so it's always easy to find
+              and tap, matching the reference screenshot's layout. */}
           <button
             onClick={() => setIsMobileMenuOpen(!isMobileMenuOpen)}
             aria-expanded={isMobileMenuOpen}
@@ -482,6 +497,8 @@ export const Navbar: React.FC<NavbarProps> = ({ onNavigate, currentPage, onOpenL
         siteSettings={siteSettings}
         isLive={isLive}
         onOpenLiveStream={onOpenLiveStream}
+        toggleTheme={toggleTheme}
+        wishlistCount={wishlistBookIds.length}
       />
     </header>
   );

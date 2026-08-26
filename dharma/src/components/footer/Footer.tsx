@@ -231,11 +231,9 @@ export const Footer: React.FC<FooterProps> = ({ onNavigate }) => {
                   Frequently Asked Questions (FAQ)
                 </button>
               </li>
-              <li>
-                <button onClick={() => onNavigate('admin-login')} className="hover:text-[#F4E285] transition-colors font-bold text-[#F4E285] flex items-center gap-1">
-                  <span>🛡️</span> Admin Portal Login (एडमिन लॉगिन)
-                </button>
-              </li>
+              {/* The public "Admin Portal Login" footer link was removed —
+                  it advertised the admin panel's existence to every visitor.
+                  Admin login is now reachable only via its own unlisted URL. */}
             </ul>
           </div>
 

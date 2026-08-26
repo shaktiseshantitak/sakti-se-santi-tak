@@ -13,7 +13,7 @@ interface AuthPageProps {
 }
 
 export const AuthPage: React.FC<AuthPageProps> = ({ onNavigate, initialMode = 'login' }) => {
-  const { login, register, authError } = useAuth();
+  const { login, register, authError, sendPasswordResetEmail } = useAuth();
   const { t } = useLanguage();
 
   const [mode, setMode] = useState<'login' | 'signup'>(initialMode);
@@ -71,7 +71,18 @@ export const AuthPage: React.FC<AuthPageProps> = ({ onNavigate, initialMode = 'l
     const result = await register(signupName, signupEmail, signupPassword, signupPhone);
     setLoading(false);
 
-    if (result.success) {
+    if (result.success && result.requiresEmailConfirmation) {
+      // The account was created, but the user is NOT logged in yet — Supabase
+      // is waiting for them to click the confirmation link in their email.
+      // Redirecting to the dashboard here (like the fully-logged-in case
+      // below) would send them straight to checkout later with no real
+      // session, producing a confusing "please sign in" error on an account
+      // they just made. Tell them the truth instead.
+      setSuccessMsg(t(
+        'खाता बन गया है! कृपया अपना ईमेल देखें और लॉगिन करने से पहले पुष्टिकरण लिंक पर क्लिक करें।',
+        'Account created! Please check your email and click the confirmation link before logging in.'
+      ));
+    } else if (result.success) {
       setSuccessMsg(t('खाता सफलतापूर्वक बनाया गया! स्वागत है।', 'Account created successfully! Welcome.'));
       setTimeout(() => onNavigate('dashboard'), 800);
     } else {
@@ -79,10 +90,18 @@ export const AuthPage: React.FC<AuthPageProps> = ({ onNavigate, initialMode = 'l
     }
   };
 
-  const handleForgotSubmit = (e: React.FormEvent) => {
+  const handleForgotSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!forgotEmail) return;
-    setForgotSent(true);
+    setErrorMsg(null);
+    setLoading(true);
+    const result = await sendPasswordResetEmail(forgotEmail);
+    setLoading(false);
+    if (result.success) {
+      setForgotSent(true);
+    } else {
+      setErrorMsg(result.error || t('कुछ गड़बड़ हुई। कृपया फिर कोशिश करें।', 'Something went wrong. Please try again.'));
+    }
   };
 
   return (

@@ -1,4 +1,4 @@
-import React, { useState, lazy, Suspense } from 'react';
+import React, { useState, useEffect, lazy, Suspense } from 'react';
 import { ThemeProvider } from './context/ThemeContext';
 import { AuthProvider } from './context/AuthContext';
 import { BookProvider, useBooks } from './context/BookContext';
@@ -39,6 +39,8 @@ const OrderTrackingPage = lazy(() => import('./pages/OrderTrackingPage').then(m 
 const CustomerDashboardPage = lazy(() => import('./pages/CustomerDashboardPage').then(m => ({ default: m.CustomerDashboardPage })));
 const AdminPage = lazy(() => import('./pages/AdminPage').then(m => ({ default: m.AdminPage })));
 const AdminLoginPage = lazy(() => import('./pages/AdminLoginPage').then(m => ({ default: m.AdminLoginPage })));
+const ResetPasswordPage = lazy(() => import('./pages/ResetPasswordPage').then(m => ({ default: m.ResetPasswordPage })));
+const EmailConfirmedPage = lazy(() => import('./pages/EmailConfirmedPage').then(m => ({ default: m.EmailConfirmedPage })));
 const LoginPage = lazy(() => import('./pages/LoginPage').then(m => ({ default: m.LoginPage })));
 const SignUpPage = lazy(() => import('./pages/SignUpPage').then(m => ({ default: m.SignUpPage })));
 const PoliciesPage = lazy(() => import('./pages/PoliciesPage').then(m => ({ default: m.PoliciesPage })));
@@ -53,6 +55,48 @@ const PageFallback = () => (
     <div className="w-10 h-10 border-3 border-[#D4AF37]/30 border-t-[#8B1E3F] rounded-full animate-spin mb-4" />
     <span className="font-serif font-bold text-sm tracking-widest text-[#4A2C17]">सामग्री लोड हो रही है...</span>
   </div>
+);
+
+// Real URL path <-> in-app page-name mapping, kept at module scope since it's
+// static (doesn't depend on any component state/props). See the note in
+// MainAppContent for why this exists.
+const PATH_TO_PAGE: Record<string, string> = {
+  '/': 'home',
+  '/books': 'books',
+  '/authors': 'authors',
+  '/blog': 'blog',
+  '/gallery': 'gallery',
+  '/faq': 'faq',
+  '/about': 'about',
+  '/contact': 'contact',
+  '/wishlist': 'wishlist',
+  '/cart': 'cart',
+  '/checkout': 'checkout',
+  '/track-order': 'track-order',
+  '/login': 'login',
+  '/signup': 'signup',
+  '/register': 'register',
+  '/dashboard': 'dashboard',
+  '/affiliate': 'affiliate',
+  '/affiliates': 'affiliates',
+  '/reset-password': 'reset-password',
+  '/email-confirmed': 'email-confirmed',
+  '/reviews': 'reviews',
+  '/curiosity': 'curiosity',
+  '/gayatri-secrets': 'gayatri-secrets',
+  '/sitemap': 'sitemap',
+  '/privacy-policy': 'privacy-policy',
+  '/terms': 'terms',
+  '/shipping-policy': 'shipping-policy',
+  '/return-policy': 'return-policy',
+  '/admin': 'admin',
+  // A deliberately unlisted, non-obvious path — not linked from anywhere in
+  // the public UI (see Navbar/MobileMenu/Footer changes) — replacing the
+  // old publicly-visible "Admin" nav link.
+  '/admin/login-user/gaytri': 'admin-login',
+};
+const PAGE_TO_PATH: Record<string, string> = Object.fromEntries(
+  Object.entries(PATH_TO_PAGE).map(([path, page]) => [page, path])
 );
 
 const MainAppContent: React.FC = () => {
@@ -77,9 +121,39 @@ const MainAppContent: React.FC = () => {
   const [isLiveStudioOpen, setIsLiveStudioOpen] = useState<boolean>(false);
   const [selectedStreamForPlayer, setSelectedStreamForPlayer] = useState<LiveStream | null>(null);
 
+  // NOTE: this app previously had NO real URL routing at all — `currentPage`
+  // was pure in-memory React state, always starting at 'home' regardless of
+  // what was typed in the browser's address bar. That meant a URL like
+  // /admin-login or /track-order (referenced elsewhere, including in earlier
+  // deployment docs) never actually worked by itself — visiting it directly
+  // just loaded the home page. It also meant Supabase's password-reset email
+  // link (which redirects to a real URL) had nowhere real to land, and there
+  // was no way to give the admin login page its own private, unlisted URL
+  // (a real bug report: admin login was publicly linked in the navbar/footer
+  // for anyone to find). This syncs page state with the browser's address
+  // bar and back/forward buttons, using the path map defined above.
+  useEffect(() => {
+    const initialPath = window.location.pathname;
+    const mappedPage = PATH_TO_PAGE[initialPath];
+    if (mappedPage) {
+      setCurrentPage(mappedPage);
+    }
+
+    const handlePopState = () => {
+      const page = PATH_TO_PAGE[window.location.pathname] || 'home';
+      setCurrentPage(page);
+    };
+    window.addEventListener('popstate', handlePopState);
+    return () => window.removeEventListener('popstate', handlePopState);
+  }, []);
+
   const handleNavigate = (page: string, params: Record<string, any> = {}) => {
     setCurrentPage(page);
     setPageParams(params);
+    const path = PAGE_TO_PATH[page];
+    if (path && window.location.pathname !== path) {
+      window.history.pushState({}, '', path);
+    }
     window.scrollTo({ top: 0, behavior: 'smooth' });
   };
 
@@ -212,6 +286,8 @@ const MainAppContent: React.FC = () => {
           {currentPage === 'admin' && <AdminPage onNavigate={handleNavigate} onOpenLiveStudio={handleOpenLiveStudio} />}
           {currentPage === 'admin-login' && <AdminLoginPage onNavigate={handleNavigate} />}
           {currentPage === 'login' && <LoginPage onNavigate={handleNavigate} />}
+          {currentPage === 'reset-password' && <ResetPasswordPage onNavigate={handleNavigate} />}
+          {currentPage === 'email-confirmed' && <EmailConfirmedPage onNavigate={handleNavigate} />}
           {(currentPage === 'signup' || currentPage === 'register') && <SignUpPage onNavigate={handleNavigate} />}
 
           {currentPage === 'privacy-policy' && <PoliciesPage type="privacy" onNavigate={handleNavigate} />}
