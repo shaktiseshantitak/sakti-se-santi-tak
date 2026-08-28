@@ -17,10 +17,16 @@ export const WishlistPage: React.FC<WishlistPageProps> = ({
   onSelectBook,
   onQuickView,
 }) => {
-  const { wishlistIds } = useCart();
+  // FIXED: this used to destructure `wishlistIds`, a property that does not
+  // exist on CartContext (the real field is `wishlistBookIds`). That made
+  // `wishlistIds` always `undefined`, and `wishlistIds.includes(b.id)` below
+  // threw a TypeError on every render — crashing the whole page to a blank
+  // white screen instead of ever reaching the "Your wishlist is empty"
+  // state that was already written further down in this file.
+  const { wishlistBookIds } = useCart();
   const { books } = useBooks();
 
-  const wishlistedBooks = books.filter(b => wishlistIds.includes(b.id));
+  const wishlistedBooks = books.filter(b => wishlistBookIds.includes(b.id));
 
   return (
     <div className="py-8 bg-[#F8F4E8] text-[#4A2C17] min-h-screen">

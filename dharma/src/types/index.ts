@@ -194,6 +194,9 @@ export interface Coupon {
   expiryDate: string;
   active: boolean;
   usageCount: number;
+  // Optional: restrict this coupon to a single book. Undefined/empty = applies
+  // to the whole cart (previous behaviour, unchanged).
+  applicableBookId?: string;
 }
 
 export interface BlogPost {

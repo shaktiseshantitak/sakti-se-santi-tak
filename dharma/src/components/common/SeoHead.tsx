@@ -43,7 +43,7 @@ export const SeoHead: React.FC<SeoHeadProps> = ({
     calculatedDesc = currentBook.seo?.metaDescription || currentBook.description;
     calculatedKeywords = currentBook.seo?.metaKeywords || (currentBook.tags ? currentBook.tags.join(', ') : `${currentBook.title}, Sanskrit books`);
     calculatedOgImage = currentBook.seo?.ogImage || currentBook.coverImage;
-    calculatedCanonical = currentBook.seo?.canonicalUrl || `${seoDefaults?.canonicalUrl || 'https://dharmabooks.org'}/book/${currentBook.slug}`;
+    calculatedCanonical = currentBook.seo?.canonicalUrl || `${seoDefaults?.canonicalUrl || 'https://shaktiseshanti.com'}/book/${currentBook.slug}`;
     calculatedType = 'book';
     calculatedSchema = schemaJson || {
       '@context': 'https://schema.org',
@@ -63,20 +63,20 @@ export const SeoHead: React.FC<SeoHeadProps> = ({
       }
     };
   } else if (currentPage === 'blog-post' && currentBlog) {
-    calculatedTitle = `${currentBlog.title} | ${siteSettings.siteName || 'Dharma Books'}`;
+    calculatedTitle = `${currentBlog.title} | ${siteSettings.siteName || 'शक्ति से शांति तक'}`;
     calculatedDesc = currentBlog.excerpt;
     calculatedOgImage = currentBlog.coverImage;
     calculatedType = 'article';
   }
 
   const finalTitle = calculatedTitle
-    ? (calculatedTitle.includes(siteSettings.siteName || 'Dharma') ? calculatedTitle : `${calculatedTitle} | ${siteSettings.siteName || 'Dharma Books'}`)
+    ? (calculatedTitle.includes(siteSettings.siteName || 'शक्ति') ? calculatedTitle : `${calculatedTitle} | ${siteSettings.siteName || 'शक्ति से शांति तक'}`)
     : (seoDefaults?.metaTitle || `${siteSettings.siteName} | Authentic Sacred Scriptures & Vedic Literature`);
 
   const finalDesc = calculatedDesc || seoDefaults?.metaDescription || siteSettings.siteTagline || 'Authentic Sanskrit scriptures & spiritual books online.';
   const finalKeywords = calculatedKeywords || seoDefaults?.metaKeywords || 'Bhagavad Gita, Sanskrit Scriptures, Vedas, Upanishads';
   const finalOgImage = calculatedOgImage || seoDefaults?.ogImageUrl || 'https://images.unsplash.com/photo-1544716278-ca5e3f4abd8c?auto=format&fit=crop&w=1200&q=80';
-  const finalCanonical = calculatedCanonical || seoDefaults?.canonicalUrl || 'https://dharmabooks.org';
+  const finalCanonical = calculatedCanonical || seoDefaults?.canonicalUrl || 'https://shaktiseshanti.com';
   const enableIndex = seoDefaults?.enableIndexing !== false;
 
   useEffect(() => {
@@ -118,7 +118,7 @@ export const SeoHead: React.FC<SeoHeadProps> = ({
     setMetaTag('meta[property="og:description"]', 'property', 'og:description', finalDesc);
     setMetaTag('meta[property="og:image"]', 'property', 'og:image', finalOgImage);
     setMetaTag('meta[property="og:type"]', 'property', 'og:type', type);
-    setMetaTag('meta[property="og:site_name"]', 'property', 'og:site_name', siteSettings.siteName || 'Dharma Books');
+    setMetaTag('meta[property="og:site_name"]', 'property', 'og:site_name', siteSettings.siteName || 'शक्ति से शांति तक');
 
     // 4. Twitter Card Tags
     setMetaTag('meta[name="twitter:card"]', 'name', 'twitter:card', 'summary_large_image');
@@ -141,12 +141,12 @@ export const SeoHead: React.FC<SeoHeadProps> = ({
     const defaultSchema = calculatedSchema || {
       '@context': 'https://schema.org',
       '@type': 'BookStore',
-      'name': siteSettings.siteName || 'Dharma Books Pro',
+      'name': siteSettings.siteName || 'शक्ति से शांति तक',
       'description': finalDesc,
       'url': finalCanonical,
       'image': finalOgImage,
       'telephone': siteSettings.contactPhone || '+91 98765 43210',
-      'email': siteSettings.contactEmail || 'support@dharmabooks.org',
+      'email': siteSettings.contactEmail || 'support@shaktiseshanti.com',
       'address': {
         '@type': 'PostalAddress',
         'streetAddress': siteSettings.address || 'Assi Ghat Road',

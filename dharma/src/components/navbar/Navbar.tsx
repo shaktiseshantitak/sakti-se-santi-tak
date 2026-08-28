@@ -132,6 +132,23 @@ export const Navbar: React.FC<NavbarProps> = ({ onNavigate, currentPage, onOpenL
 
       {/* Main Navbar */}
       <div className="max-w-7xl mx-auto px-2 sm:px-4 lg:px-8 py-2 sm:py-3.5 flex items-center justify-between gap-1.5 sm:gap-4 w-full max-w-full overflow-hidden">
+        {/* Mobile Menu Toggle Button — placed to the left, next to the
+            brand logo, matching the requested reference layout (MLBD-style:
+            hamburger + logo grouped on the left, cart/account on the right). */}
+        <button
+          onClick={() => setIsMobileMenuOpen(!isMobileMenuOpen)}
+          aria-expanded={isMobileMenuOpen}
+          aria-label={isMobileMenuOpen ? "Close navigation menu" : "Open navigation menu"}
+          aria-controls="mobile-navigation-drawer"
+          className="md:hidden p-2 text-[#F4E285] bg-[#66122C] hover:bg-[#500D20] rounded-xl border border-[#D4AF37]/40 flex items-center gap-1.5 font-bold text-xs shrink-0 active:scale-95 transition-all shadow-xs"
+        >
+          {isMobileMenuOpen ? (
+            <X className="w-5 h-5 text-[#F4E285]" aria-hidden="true" />
+          ) : (
+            <Menu className="w-5 h-5 text-[#F4E285]" aria-hidden="true" />
+          )}
+        </button>
+
         {/* Brand Logo */}
         <div
           onClick={() => onNavigate('home')}
@@ -321,26 +338,6 @@ export const Navbar: React.FC<NavbarProps> = ({ onNavigate, currentPage, onOpenL
                 {totalItemsCount}
               </span>
             )}
-          </button>
-
-          {/* Mobile Menu Toggle Button — now one of only two icons visible on
-              a phone screen (alongside Cart), so it's always easy to find
-              and tap, matching the reference screenshot's layout. */}
-          <button
-            onClick={() => setIsMobileMenuOpen(!isMobileMenuOpen)}
-            aria-expanded={isMobileMenuOpen}
-            aria-label={isMobileMenuOpen ? "Close navigation menu" : "Open navigation menu"}
-            aria-controls="mobile-navigation-drawer"
-            className="md:hidden p-2 text-[#F4E285] bg-[#66122C] hover:bg-[#500D20] rounded-xl border border-[#D4AF37]/40 flex items-center gap-1.5 font-bold text-xs shrink-0 active:scale-95 transition-all shadow-xs"
-          >
-            {isMobileMenuOpen ? (
-              <X className="w-5 h-5 text-[#F4E285]" aria-hidden="true" />
-            ) : (
-              <Menu className="w-5 h-5 text-[#F4E285]" aria-hidden="true" />
-            )}
-            <span className="text-[11px] text-amber-200 font-extrabold hidden xs:inline">
-              {isMobileMenuOpen ? 'बंद करें' : 'मेन्यू'}
-            </span>
           </button>
         </div>
       </div>

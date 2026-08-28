@@ -249,7 +249,7 @@ Key Highlights:
 • Comprehensive commentary illuminating Vedantic principles.
 • Includes Gita Dhyanam, Gita Mahatmya, and Alphabetical Index of Shlokas.`,
     isbn: '978-8175050419',
-    publisher: 'Dharma Books Publishing House',
+    publisher: 'Shakti Se Shanti Sansthan (shaktiseshanti.com)',
     publicationYear: 2024,
     edition: '12th Gold Edition',
     pages: 784,
@@ -357,7 +357,7 @@ Features:
 
 Edited by philosopher Dr. S. Radhakrishnan, this volume provides deep scholarly analysis coupled with spiritual reverence.`,
     isbn: '978-0060667351',
-    publisher: 'HarperCollins India & Dharma Books',
+    publisher: 'HarperCollins India & Shakti Se Shanti Sansthan',
     publicationYear: 2023,
     edition: 'Centennial Scholarly Edition',
     pages: 960,
@@ -410,7 +410,7 @@ Includes:
 • Hanuman Yantra for meditation.
 • Sankat Mochan Ashtak, Hanuman Aarti & Bajrang Baan.`,
     isbn: '978-8170502120',
-    publisher: 'Dharma Books Pocket Classics',
+    publisher: 'Shakti Se Shanti Pocket Classics',
     publicationYear: 2024,
     edition: '2024 Hanuman Jayanti Edition',
     pages: 128,
@@ -497,7 +497,7 @@ This monumental 4-volume set is hardbound in velvet cloth with gold gilding. It 
     description: 'The sublime crown jewel of Puranic literature detailing the incarnations of Lord Vishnu, culminating in the 10th Canto’s divine Krishna Lila.',
     longDescription: `Srimad Bhagavatam is described as the ripe fruit of the Vedic desire tree. It imparts pure unalloyed love for God through captivating spiritual histories, discussions between Shukadeva Goswami and King Parikshit, and profound philosophical discourses.`,
     isbn: '978-8175051188',
-    publisher: 'Dharma Books Classics',
+    publisher: 'Shakti Se Shanti Classics',
     publicationYear: 2024,
     edition: 'Royal Edition',
     pages: 2400,
@@ -673,7 +673,7 @@ export const INITIAL_VIDEOS: VideoItem[] = [
     id: 'vid-3',
     title: 'How Sacred Vedic Printing & Book Binding is Preserved',
     youtubeId: 'YQHsXMglC9A',
-    description: 'Behind the scenes at Dharma Books publishing house in Varanasi.',
+    description: 'Behind the scenes at Shakti Se Shanti Tak publishing house in Varanasi.',
     duration: '09:15',
     speaker: 'Master Printer Ramesh Chand',
     category: 'Documentary',
@@ -740,7 +740,7 @@ export const INITIAL_FAQS: FaqItem[] = [
   {
     id: 'faq-1',
     question: 'Are all scripture editions authentic and verified by traditional scholars?',
-    answer: 'Yes! Every text, verse translation, and commentary published by Dharma Books undergoes rigorous peer review by traditional Sanskrit pundits, Acharyas, and Vedantic scholars to guarantee textual purity and fidelity.',
+    answer: 'Yes! Every text, verse translation, and commentary published by Shakti Se Shanti Tak undergoes rigorous peer review by traditional Sanskrit pundits, Acharyas, and Vedantic scholars to guarantee textual purity and fidelity.',
     category: 'Authenticity & Publishing',
   },
   {
@@ -763,7 +763,7 @@ export const INITIAL_FAQS: FaqItem[] = [
   },
   {
     id: 'faq-5',
-    question: 'What payment methods are supported on Dharma Books?',
+    question: 'What payment methods are supported on Shakti Se Shanti Tak?',
     answer: 'We support all major Indian & international payment gateways: UPI (GPay, PhonePe, Paytm, BHIM), Credit/Debit Cards (Visa, Mastercard, RuPay), Net Banking across 50+ banks, Wallets, and Cash on Delivery (COD within India).',
     category: 'Payments & Orders',
   },

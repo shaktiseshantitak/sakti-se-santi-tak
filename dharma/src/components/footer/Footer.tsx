@@ -309,6 +309,9 @@ export const Footer: React.FC<FooterProps> = ({ onNavigate }) => {
             Crafted with <Heart className="w-3.5 h-3.5 text-[#F4E285] fill-current" /> for Seekers of Sanatana Dharma worldwide.
           </p>
         </div>
+        <div className="mt-2 text-center text-[11px] text-amber-200/60">
+          <p>Developed &amp; Deployed by Mr. Sitaram Ghintala</p>
+        </div>
       </div>
     </footer>
   );

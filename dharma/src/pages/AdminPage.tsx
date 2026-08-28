@@ -45,9 +45,34 @@ export const AdminPage: React.FC<AdminPageProps> = ({ onNavigate, onOpenLiveStud
     addCoupon, toggleCouponStatus, deleteCoupon,
     addReview, toggleReviewApproval, deleteReview,
     updateOrderStatus, updateOrderDetails, deleteOrder,
-    updateSiteSettings, clearAuditLogs, resetToInitialData
+    updateSiteSettings, clearAuditLogs, resetToInitialData,
+    lastSyncError, clearSyncError
   } = useBooks();
-  const { user, isAdmin } = useAuth();
+  const { user, isAdmin, sessionToken } = useAuth();
+  const [backupStatus, setBackupStatus] = useState<string | null>(null);
+  const [isBackingUp, setIsBackingUp] = useState(false);
+
+  // Manual trigger for the Google Sheets daily backup (see
+  // src/lib/googleSheetsBackup.ts + netlify/functions/daily-backup.ts for
+  // the automatic once-a-day run). Office staff can hit this any time they
+  // need a fresh export rather than waiting for the nightly schedule.
+  const handleBackupNow = async () => {
+    setIsBackingUp(true);
+    setBackupStatus(null);
+    try {
+      const resp = await fetch('/api/admin/backup-now', {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${sessionToken}` },
+      });
+      const data = await resp.json();
+      if (!resp.ok) throw new Error(data.error || 'Backup failed.');
+      setBackupStatus(`Backed up ${data.results.length} tabs successfully.`);
+    } catch (err: any) {
+      setBackupStatus(`Backup failed: ${err.message}`);
+    } finally {
+      setIsBackingUp(false);
+    }
+  };
 
   // NOTE: this used to also gate on `isAdminTotpVerified`, a property that was
   // never defined anywhere in AuthContext (not in the interface, not in the
@@ -229,10 +254,10 @@ export const AdminPage: React.FC<AdminPageProps> = ({ onNavigate, onOpenLiveStud
   const [seoTitle, setSeoTitle] = useState<string>(siteSettings.seo?.metaTitle || '');
   const [seoDesc, setSeoDesc] = useState<string>(siteSettings.seo?.metaDescription || '');
   const [seoKeywords, setSeoKeywords] = useState<string>(siteSettings.seo?.metaKeywords || '');
-  const [seoCanonical, setSeoCanonical] = useState<string>(siteSettings.seo?.canonicalUrl || 'https://dharmabooks.org');
+  const [seoCanonical, setSeoCanonical] = useState<string>(siteSettings.seo?.canonicalUrl || 'https://shaktiseshanti.com');
   const [seoOgImage, setSeoOgImage] = useState<string>(siteSettings.seo?.ogImageUrl || 'https://images.unsplash.com/photo-1544716278-ca5e3f4abd8c?auto=format&fit=crop&w=1200&q=80');
   const [seoVerification, setSeoVerification] = useState<string>(siteSettings.seo?.googleSiteVerification || 'google-site-verification-dharma-2026');
-  const [seoRobots, setSeoRobots] = useState<string>(siteSettings.seo?.robotsTxtRules || 'User-agent: *\nAllow: /\nSitemap: https://dharmabooks.org/sitemap.xml');
+  const [seoRobots, setSeoRobots] = useState<string>(siteSettings.seo?.robotsTxtRules || 'User-agent: *\nAllow: /\nSitemap: https://shaktiseshanti.com/sitemap.xml');
   const [seoIndexing, setSeoIndexing] = useState<boolean>(siteSettings.seo?.enableIndexing ?? true);
 
   // Storage Upload Progress & Status State
@@ -369,6 +394,15 @@ export const AdminPage: React.FC<AdminPageProps> = ({ onNavigate, onOpenLiveStud
   // Coupon form
   const [newCode, setNewCode] = useState<string>('');
   const [newDiscount, setNewDiscount] = useState<number>(15);
+  // FIXED: the coupon form only ever exposed code + a single "% discount"
+  // number, hardcoding discountType='percentage', minOrderValue=500, and a
+  // fixed 1-year expiry — so an admin trying to create a flat-₹ voucher, a
+  // different minimum order, a custom expiry, or a voucher restricted to
+  // one specific book had no way to do so at all.
+  const [newDiscountType, setNewDiscountType] = useState<'percentage' | 'fixed'>('percentage');
+  const [newMinOrder, setNewMinOrder] = useState<number>(500);
+  const [newExpiryDate, setNewExpiryDate] = useState<string>('');
+  const [newCouponBookId, setNewCouponBookId] = useState<string>('');
 
   // Blog form
   const [showBlogModal, setShowBlogModal] = useState<boolean>(false);
@@ -823,7 +857,7 @@ export const AdminPage: React.FC<AdminPageProps> = ({ onNavigate, onOpenLiveStud
     setFormOrigTitle(b.originalTitle || '');
     setFormDesc(b.description || '');
     setFormLongDesc(b.longDescription || '');
-    setFormPublisher(b.publisher || 'Dharma Books Publishing');
+    setFormPublisher(b.publisher || 'Shakti Se Shanti Sansthan');
     setFormPages(b.pages || 350);
     setFormMrp(b.mrp);
     setFormOfferPrice(b.offerPrice);
@@ -934,11 +968,11 @@ export const AdminPage: React.FC<AdminPageProps> = ({ onNavigate, onOpenLiveStud
         metaKeywords: seoKeywords,
         canonicalUrl: seoCanonical,
         ogImageUrl: seoOgImage,
-        twitterHandle: '@dharmabookspro',
+        twitterHandle: '@shaktiseshanti',
         googleSiteVerification: seoVerification,
         robotsTxtRules: seoRobots,
         enableIndexing: seoIndexing,
-        authorOrPublisherName: 'Dharma Books Publishing House, Varanasi',
+        authorOrPublisherName: 'Shakti Se Shanti Sansthan, Varanasi',
       },
     });
     triggerToast('Inbuilt SEO & Google Indexing Settings Saved Globally!');
@@ -1041,27 +1075,25 @@ export const AdminPage: React.FC<AdminPageProps> = ({ onNavigate, onOpenLiveStud
   const handleCreateCoupon = (e: React.FormEvent) => {
     e.preventDefault();
     if (!newCode) return;
-    // FIXED: this previously built the coupon with field names (discountPercent,
-    // minOrderAmount, validUntil) that don't exist on the real Coupon type
-    // (discountType, discountValue, minOrderValue, expiryDate). addCoupon's
-    // Supabase insert relies on discountValue, which was always undefined here —
-    // and discount_value is NOT NULL in the database — so every coupon created
-    // through this form silently failed to save to Supabase (visible only in the
-    // admin's own local browser state, never usable by an actual customer at
-    // checkout). Also fixed: expiryDate was hardcoded to 2025-12-31, already in
-    // the past — every "successfully" created coupon would have been dead on
-    // arrival even if it had saved. Now defaults to one year out.
-    const oneYearOut = new Date();
-    oneYearOut.setFullYear(oneYearOut.getFullYear() + 1);
     addCoupon({
       code: newCode.toUpperCase(),
-      discountType: 'percentage',
+      discountType: newDiscountType,
       discountValue: newDiscount,
-      minOrderValue: 500,
-      expiryDate: oneYearOut.toISOString().split('T')[0],
+      minOrderValue: newMinOrder,
+      expiryDate: newExpiryDate || (() => {
+        const d = new Date();
+        d.setFullYear(d.getFullYear() + 1);
+        return d.toISOString().split('T')[0];
+      })(),
       active: true,
+      applicableBookId: newCouponBookId || undefined,
     });
     setNewCode('');
+    setNewDiscount(15);
+    setNewDiscountType('percentage');
+    setNewMinOrder(500);
+    setNewExpiryDate('');
+    setNewCouponBookId('');
     triggerToast('Coupon Voucher Generated!');
   };
 
@@ -1070,7 +1102,14 @@ export const AdminPage: React.FC<AdminPageProps> = ({ onNavigate, onOpenLiveStud
     if (!blogTitle) return;
     addBlogPost({
       title: blogTitle,
-      slug: blogTitle.toLowerCase().replace(/\s+/g, '-'),
+      // FIXED: slug is UNIQUE NOT NULL in the database. Publishing a second
+      // article with the same (or similarly-worded) title generated the
+      // exact same slug as an earlier one, which silently failed the
+      // insert (unique constraint violation) — the article "published"
+      // fine in the admin's own browser but never actually reached the
+      // database, so it never appeared anywhere else. Appending a short
+      // random suffix makes every slug unique regardless of title reuse.
+      slug: `${blogTitle.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/(^-|-$)/g, '')}-${Date.now().toString(36)}`,
       excerpt: blogExcerpt || 'Spiritual discourse and sacred commentary.',
       content: blogContent || 'Sacred wisdom commentary...',
       author: blogAuthor,
@@ -1185,6 +1224,24 @@ CREATE POLICY "Admin All Access" ON public.books FOR ALL USING (auth.role() = 'a
           </div>
         )}
 
+        {/* Save-failed alert — see BookContext.tsx's lastSyncError comment
+            for why this exists: every add/edit/delete below used to look
+            like it worked (optimistic local update) even when the actual
+            database write silently failed. This makes that failure visible
+            and explicit instead of the admin finding out days later that a
+            book/coupon/article never actually went live. */}
+        {lastSyncError && (
+          <div className="p-4 bg-rose-900 text-rose-100 rounded-2xl shadow-sm flex items-center justify-between text-xs font-bold gap-3">
+            <div className="flex items-center gap-2">
+              <AlertCircle className="w-5 h-5 text-rose-300 shrink-0" />
+              <span>{lastSyncError}</span>
+            </div>
+            <button onClick={clearSyncError} className="shrink-0 text-rose-200 hover:text-white">
+              <X className="w-4 h-4" />
+            </button>
+          </div>
+        )}
+
         {/* Supabase Storage Uploading Status Banner */}
         {isUploading && (
           <div className="p-4 bg-amber-900 text-amber-50 rounded-2xl shadow-md border border-amber-600 flex flex-col gap-2 font-bold text-xs animate-in fade-in slide-in-from-top-2">
@@ -1212,7 +1269,7 @@ CREATE POLICY "Admin All Access" ON public.books FOR ALL USING (auth.role() = 'a
               <ShieldCheck className="w-4 h-4 text-[#8B1E3F]" /> Master Website Control Center
             </div>
             <h1 className="font-serif text-3xl font-bold text-[#8B1E3F] mt-1">
-              Dharma Books Pro — Master Executive Panel
+              Shakti Se Shanti Tak — Master Executive Panel
             </h1>
             <p className="text-xs text-[#6E4E37] font-medium mt-1">
               Full administrative authority over site catalog, banners, orders, pricing, security & databases.
@@ -1409,340 +1466,40 @@ CREATE POLICY "Admin All Access" ON public.books FOR ALL USING (auth.role() = 'a
               </div>
             )}
 
-            {/* LIVE SERVER TELEMETRY & TRAFFIC ORIGINS DASHBOARD CARD */}
-            <div className="bg-white dark:bg-zinc-900 rounded-3xl p-6 border border-zinc-200 dark:border-zinc-800 shadow-sm space-y-6">
-              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-4 border-b border-zinc-100 dark:border-zinc-800">
-                <div className="flex items-center gap-3">
-                  <div className="w-10 h-10 rounded-2xl bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 flex items-center justify-center border border-emerald-500/20 shadow-inner">
-                    <Activity className="w-5 h-5 animate-pulse" />
-                  </div>
-                  <div>
-                    <h3 className="font-serif font-bold text-lg text-zinc-900 dark:text-white flex items-center gap-2">
-                      <span>🔴 रियल-टाइम लाइव ट्रैफ़िक एवं सर्वर मैट्रिक्स (Live Traffic & Server Telemetry)</span>
-                    </h3>
-                    <p className="text-xs text-zinc-500 dark:text-zinc-400">
-                      वर्तमान में सक्रिय यूज़र्स, CPU & RAM मेमोरी उपयोग, ट्रैफिक स्रोत (Sources) और लाइव लोकेशन
-                    </p>
-                  </div>
-                </div>
-                <div className="flex items-center gap-2 flex-wrap">
-                  <button
-                    type="button"
-                    onClick={() => setShowRealSpecsModal(true)}
-                    className="flex items-center gap-1.5 px-3 py-1 bg-amber-500/10 hover:bg-amber-500/20 text-amber-800 dark:text-amber-300 rounded-full font-mono text-[11px] font-bold border border-amber-500/30 transition-all"
-                  >
-                    <Zap className="w-3.5 h-3.5 text-amber-600" />
-                    <span>⚡ Inspector Specs</span>
-                  </button>
-                  <span className="flex items-center gap-1.5 px-3 py-1 bg-emerald-500/10 text-emerald-700 dark:text-emerald-300 rounded-full font-mono text-[11px] font-bold border border-emerald-500/30">
-                    <span className="w-2 h-2 rounded-full bg-emerald-500 animate-ping" />
-                    REAL TELEMETRY ON
-                  </span>
-                  <span className="text-[11px] font-mono text-zinc-600 dark:text-zinc-300 bg-zinc-100 dark:bg-zinc-800 px-2.5 py-1 rounded-lg border border-zinc-200 dark:border-zinc-700">
-                    Ping: <strong className="text-emerald-600 dark:text-emerald-400">{latencyMs}ms</strong>
-                  </span>
-                </div>
-              </div>
+            {/* FIXED (2026-08-28 report — "Live Traffic & Server Telemetry yeh sab fake hai"):
+                the old card here read the ADMIN'S OWN browser tab's CPU/RAM/hardware-concurrency
+                stats (performance.memory, navigator.hardwareConcurrency) and labelled them
+                "REAL TELEMETRY" / "Real CPU Thread Load" / "Live Traffic" — none of which had
+                anything to do with actual site visitors or server load; it was just the
+                admin's own machine, dressed up to look like live server monitoring. There is no
+                real visitor-analytics or server-metrics infrastructure in this stack to honestly
+                back a widget like this (Netlify Functions don't expose live CPU/RAM, and there's
+                no analytics/presence table), so it's removed rather than kept misleading. */}
 
-              {/* Top 4 Hardware & Online User Gauges */}
-              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-                {/* Card 1: Live Online Users */}
-                <div className="bg-emerald-50 dark:from-emerald-950/30 dark:to-zinc-900 p-4 rounded-2xl border border-emerald-200 dark:border-emerald-900/50 space-y-2">
-                  <div className="flex justify-between items-center text-xs font-bold text-emerald-900 dark:text-emerald-300">
-                    <span className="flex items-center gap-1.5 uppercase tracking-wider text-[11px]">
-                      <Users className="w-4 h-4 text-emerald-600" /> Active Tab Sessions
-                    </span>
-                    <span className="w-2.5 h-2.5 rounded-full bg-emerald-500 animate-pulse" />
-                  </div>
-                  <div className="flex items-baseline gap-2">
-                    <span className="font-serif text-3xl font-extrabold text-emerald-700 dark:text-emerald-400">
-                      {liveUsersCount}
-                    </span>
-                    <span className="text-xs font-semibold text-emerald-800 dark:text-emerald-300">Active Tab{liveUsersCount > 1 ? 's' : ''}</span>
-                  </div>
-                  <p className="text-[11px] text-zinc-500 dark:text-zinc-400">
-                    Real-time cross-tab browser heartbeat
-                  </p>
-                </div>
-
-                {/* Card 2: CPU Usage */}
-                <div className="bg-blue-50 dark:from-blue-950/30 dark:to-zinc-900 p-4 rounded-2xl border border-blue-200 dark:border-blue-900/50 space-y-2">
-                  <div className="flex justify-between items-center text-xs font-bold text-blue-900 dark:text-blue-300">
-                    <span className="flex items-center gap-1.5 uppercase tracking-wider text-[11px]">
-                      <Cpu className="w-4 h-4 text-blue-600" /> Real CPU Thread Load
-                    </span>
-                    <span className="text-[10px] font-mono bg-blue-100 dark:bg-blue-900 text-blue-800 dark:text-blue-200 px-1.5 py-0.5 rounded">
-                      {cpuUsagePercent < 40 ? 'Healthy' : 'Active'}
-                    </span>
-                  </div>
-                  <div className="flex items-baseline gap-2">
-                    <span className="font-serif text-3xl font-extrabold text-blue-700 dark:text-blue-400">
-                      {cpuUsagePercent}%
-                    </span>
-                    <span className="text-xs text-zinc-500">of {hardwareCores} Cores</span>
-                  </div>
-                  {/* Progress Bar */}
-                  <div className="w-full h-2 bg-blue-200 dark:bg-blue-950 rounded-full overflow-hidden">
-                    <div
-                      className="h-full bg-blue-600 dark:bg-blue-400 transition-all duration-500 rounded-full"
-                      style={{ width: `${cpuUsagePercent}%` }}
-                    />
-                  </div>
-                </div>
-
-                {/* Card 3: RAM Memory Usage */}
-                <div className="bg-purple-50 dark:from-purple-950/30 dark:to-zinc-900 p-4 rounded-2xl border border-purple-200 dark:border-purple-900/50 space-y-2">
-                  <div className="flex justify-between items-center text-xs font-bold text-purple-900 dark:text-purple-300">
-                    <span className="flex items-center gap-1.5 uppercase tracking-wider text-[11px]">
-                      <HardDrive className="w-4 h-4 text-purple-600" /> Real RAM JS Heap
-                    </span>
-                    <span className="text-[10px] font-mono bg-purple-100 dark:bg-purple-900 text-purple-800 dark:text-purple-200 px-1.5 py-0.5 rounded">
-                      {Math.round((memoryUsageMB / maxMemoryMB) * 100)}%
-                    </span>
-                  </div>
-                  <div className="flex items-baseline gap-2">
-                    <span className="font-serif text-3xl font-extrabold text-purple-700 dark:text-purple-400">
-                      {memoryUsageMB}
-                    </span>
-                    <span className="text-xs text-zinc-500">MB / {maxMemoryMB} MB</span>
-                  </div>
-                  {/* Progress Bar */}
-                  <div className="w-full h-2 bg-purple-200 dark:bg-purple-950 rounded-full overflow-hidden">
-                    <div
-                      className="h-full bg-purple-600 dark:bg-purple-400 transition-all duration-500 rounded-full"
-                      style={{ width: `${Math.min(100, (memoryUsageMB / maxMemoryMB) * 100)}%` }}
-                    />
-                  </div>
-                </div>
-
-                {/* Card 4: Server Uptime & Latency */}
-                <div className="bg-amber-50 dark:from-amber-950/30 dark:to-zinc-900 p-4 rounded-2xl border border-amber-200 dark:border-amber-900/50 space-y-2">
-                  <div className="flex justify-between items-center text-xs font-bold text-amber-900 dark:text-amber-300">
-                    <span className="flex items-center gap-1.5 uppercase tracking-wider text-[11px]">
-                      <Server className="w-4 h-4 text-amber-600" /> Session Uptime
-                    </span>
-                    <ShieldCheck className="w-4 h-4 text-emerald-500" />
-                  </div>
-                  <div className="flex items-baseline gap-2">
-                    <span className="font-serif text-2xl font-extrabold text-amber-800 dark:text-amber-300">
-                      {formatUptimeStr(uptimeSeconds)}
-                    </span>
-                    <span className="text-[11px] text-emerald-600 font-bold">100% Active</span>
-                  </div>
-                  <p className="text-[11px] text-zinc-500 dark:text-zinc-400">
-                    {window.location.protocol.toUpperCase().replace(':', '')} TLS 1.3 • {networkConnectionType} Network
-                  </p>
-                </div>
-              </div>
-
-              {/* Two-Column Telemetry: Acquisition Traffic Sources & Geo Locations */}
-              <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 pt-2">
-                {/* Column 1: Where traffic comes from (Sources) */}
-                <div className="p-4 bg-zinc-50 dark:bg-zinc-800/50 rounded-2xl border border-zinc-200 dark:border-zinc-800 space-y-4">
-                  <div className="flex items-center justify-between">
-                    <h4 className="font-bold text-xs uppercase tracking-wider text-zinc-800 dark:text-zinc-200 flex items-center gap-2">
-                      <Compass className="w-4 h-4 text-amber-600" />
-                      <span>यूज़र कहाँ से आ रहे हैं (Traffic Origins & Referrals)</span>
-                    </h4>
-                    <span className="text-[10px] font-mono text-zinc-400">Real-time Acquisition</span>
-                  </div>
-
-                  <div className="space-y-3 text-xs">
-                    <div>
-                      <div className="flex justify-between font-semibold mb-1 text-zinc-700 dark:text-zinc-300">
-                        <span className="flex items-center gap-1.5">
-                          <Search className="w-3.5 h-3.5 text-blue-500" /> Google Search (Organic SEO)
-                        </span>
-                        <span className="font-mono font-bold">42% ({Math.round(liveUsersCount * 0.42)} users)</span>
-                      </div>
-                      <div className="w-full h-2 bg-zinc-200 dark:bg-zinc-700 rounded-full overflow-hidden">
-                        <div className="h-full bg-blue-500 rounded-full" style={{ width: '42%' }} />
-                      </div>
-                    </div>
-
-                    <div>
-                      <div className="flex justify-between font-semibold mb-1 text-zinc-700 dark:text-zinc-300">
-                        <span className="flex items-center gap-1.5">
-                          <Share2 className="w-3.5 h-3.5 text-emerald-500" /> WhatsApp Direct Shares
-                        </span>
-                        <span className="font-mono font-bold">28% ({Math.round(liveUsersCount * 0.28)} users)</span>
-                      </div>
-                      <div className="w-full h-2 bg-zinc-200 dark:bg-zinc-700 rounded-full overflow-hidden">
-                        <div className="h-full bg-emerald-500 rounded-full" style={{ width: '28%' }} />
-                      </div>
-                    </div>
-
-                    <div>
-                      <div className="flex justify-between font-semibold mb-1 text-zinc-700 dark:text-zinc-300">
-                        <span className="flex items-center gap-1.5">
-                          <Globe className="w-3.5 h-3.5 text-purple-500" /> Instagram & Facebook Social
-                        </span>
-                        <span className="font-mono font-bold">16% ({Math.round(liveUsersCount * 0.16)} users)</span>
-                      </div>
-                      <div className="w-full h-2 bg-zinc-200 dark:bg-zinc-700 rounded-full overflow-hidden">
-                        <div className="h-full bg-purple-500 rounded-full" style={{ width: '16%' }} />
-                      </div>
-                    </div>
-
-                    <div>
-                      <div className="flex justify-between font-semibold mb-1 text-zinc-700 dark:text-zinc-300">
-                        <span className="flex items-center gap-1.5">
-                          <Link2 className="w-3.5 h-3.5 text-amber-500" /> Direct Visit / Bookmarks
-                        </span>
-                        <span className="font-mono font-bold">9% ({Math.round(liveUsersCount * 0.09)} users)</span>
-                      </div>
-                      <div className="w-full h-2 bg-zinc-200 dark:bg-zinc-700 rounded-full overflow-hidden">
-                        <div className="h-full bg-amber-500 rounded-full" style={{ width: '9%' }} />
-                      </div>
-                    </div>
-
-                    <div>
-                      <div className="flex justify-between font-semibold mb-1 text-zinc-700 dark:text-zinc-300">
-                        <span className="flex items-center gap-1.5">
-                          <Video className="w-3.5 h-3.5 text-rose-500" /> YouTube Channel / Video Links
-                        </span>
-                        <span className="font-mono font-bold">5% ({Math.round(liveUsersCount * 0.05)} users)</span>
-                      </div>
-                      <div className="w-full h-2 bg-zinc-200 dark:bg-zinc-700 rounded-full overflow-hidden">
-                        <div className="h-full bg-rose-500 rounded-full" style={{ width: '5%' }} />
-                      </div>
-                    </div>
-                  </div>
-                </div>
-
-                {/* Column 2: User Locations (Geographic breakdown) */}
-                <div className="p-4 bg-zinc-50 dark:bg-zinc-800/50 rounded-2xl border border-zinc-200 dark:border-zinc-800 space-y-4">
-                  <div className="flex items-center justify-between">
-                    <h4 className="font-bold text-xs uppercase tracking-wider text-zinc-800 dark:text-zinc-200 flex items-center gap-2">
-                      <MapPin className="w-4 h-4 text-rose-600" />
-                      <span>लाइव यूज़र लोकेशन्स (Geographic Live Visitors)</span>
-                    </h4>
-                    <span className="text-[10px] font-mono text-zinc-400">IP Geo-location</span>
-                  </div>
-
-                  <div className="grid grid-cols-2 gap-2 text-xs">
-                    <div className="p-2.5 bg-white dark:bg-zinc-900 rounded-xl border border-zinc-200 dark:border-zinc-800 flex items-center justify-between">
-                      <div className="flex items-center gap-2">
-                        <span className="text-base">🇮🇳</span>
-                        <div>
-                          <span className="font-bold block text-zinc-800 dark:text-zinc-200">Delhi (NCR)</span>
-                          <span className="text-[10px] text-zinc-400">India</span>
-                        </div>
-                      </div>
-                      <span className="font-mono font-bold bg-amber-100 dark:bg-amber-950 text-amber-800 dark:text-amber-300 px-2 py-0.5 rounded text-[11px]">
-                        {Math.round(liveUsersCount * 0.35)} Live
-                      </span>
-                    </div>
-
-                    <div className="p-2.5 bg-white dark:bg-zinc-900 rounded-xl border border-zinc-200 dark:border-zinc-800 flex items-center justify-between">
-                      <div className="flex items-center gap-2">
-                        <span className="text-base">🇮🇳</span>
-                        <div>
-                          <span className="font-bold block text-zinc-800 dark:text-zinc-200">Varanasi</span>
-                          <span className="text-[10px] text-zinc-400">Uttar Pradesh</span>
-                        </div>
-                      </div>
-                      <span className="font-mono font-bold bg-amber-100 dark:bg-amber-950 text-amber-800 dark:text-amber-300 px-2 py-0.5 rounded text-[11px]">
-                        {Math.round(liveUsersCount * 0.24)} Live
-                      </span>
-                    </div>
-
-                    <div className="p-2.5 bg-white dark:bg-zinc-900 rounded-xl border border-zinc-200 dark:border-zinc-800 flex items-center justify-between">
-                      <div className="flex items-center gap-2">
-                        <span className="text-base">🇮🇳</span>
-                        <div>
-                          <span className="font-bold block text-zinc-800 dark:text-zinc-200">Mumbai</span>
-                          <span className="text-[10px] text-zinc-400">Maharashtra</span>
-                        </div>
-                      </div>
-                      <span className="font-mono font-bold bg-amber-100 dark:bg-amber-950 text-amber-800 dark:text-amber-300 px-2 py-0.5 rounded text-[11px]">
-                        {Math.round(liveUsersCount * 0.18)} Live
-                      </span>
-                    </div>
-
-                    <div className="p-2.5 bg-white dark:bg-zinc-900 rounded-xl border border-zinc-200 dark:border-zinc-800 flex items-center justify-between">
-                      <div className="flex items-center gap-2">
-                        <span className="text-base">🇮🇳</span>
-                        <div>
-                          <span className="font-bold block text-zinc-800 dark:text-zinc-200">Jaipur</span>
-                          <span className="text-[10px] text-zinc-400">Rajasthan</span>
-                        </div>
-                      </div>
-                      <span className="font-mono font-bold bg-amber-100 dark:bg-amber-950 text-amber-800 dark:text-amber-300 px-2 py-0.5 rounded text-[11px]">
-                        {Math.round(liveUsersCount * 0.11)} Live
-                      </span>
-                    </div>
-
-                    <div className="p-2.5 bg-white dark:bg-zinc-900 rounded-xl border border-zinc-200 dark:border-zinc-800 flex items-center justify-between">
-                      <div className="flex items-center gap-2">
-                        <span className="text-base">🇮🇳</span>
-                        <div>
-                          <span className="font-bold block text-zinc-800 dark:text-zinc-200">Lucknow</span>
-                          <span className="text-[10px] text-zinc-400">Uttar Pradesh</span>
-                        </div>
-                      </div>
-                      <span className="font-mono font-bold bg-amber-100 dark:bg-amber-950 text-amber-800 dark:text-amber-300 px-2 py-0.5 rounded text-[11px]">
-                        {Math.round(liveUsersCount * 0.08)} Live
-                      </span>
-                    </div>
-
-                    <div className="p-2.5 bg-white dark:bg-zinc-900 rounded-xl border border-zinc-200 dark:border-zinc-800 flex items-center justify-between">
-                      <div className="flex items-center gap-2">
-                        <span className="text-base">🇮🇳</span>
-                        <div>
-                          <span className="font-bold block text-zinc-800 dark:text-zinc-200">Bengaluru</span>
-                          <span className="text-[10px] text-zinc-400">Karnataka</span>
-                        </div>
-                      </div>
-                      <span className="font-mono font-bold bg-amber-100 dark:bg-amber-950 text-amber-800 dark:text-amber-300 px-2 py-0.5 rounded text-[11px]">
-                        {Math.round(liveUsersCount * 0.04)} Live
-                      </span>
-                    </div>
-                  </div>
-                </div>
-              </div>
-
-              {/* Live Active Pages Section */}
-              <div className="p-4 bg-amber-500/10 border border-amber-500/20 rounded-2xl space-y-3">
-                <div className="flex items-center justify-between text-xs">
-                  <span className="font-bold text-amber-900 dark:text-amber-200 flex items-center gap-1.5">
-                    <Eye className="w-4 h-4 text-amber-600" />
-                    <span>लाइव यूज़र इस समय किन पेजों पर हैं (Active Page Viewers):</span>
-                  </span>
-                  <span className="text-[10px] font-mono bg-amber-600 text-white px-2 py-0.5 rounded font-bold">
-                    Live Session Stream
-                  </span>
-                </div>
-
-                <div className="grid grid-cols-1 sm:grid-cols-3 gap-2 text-xs">
-                  <div className="bg-white dark:bg-zinc-900 p-2.5 rounded-xl border border-amber-200 dark:border-amber-900/40 flex items-center justify-between">
-                    <span className="font-mono text-[11px] text-zinc-600 dark:text-zinc-300 truncate">
-                      /book/shakti-se-shanti
-                    </span>
-                    <span className="font-bold text-emerald-600 shrink-0 text-[11px]">
-                      {Math.round(liveUsersCount * 0.45)} reading
-                    </span>
-                  </div>
-
-                  <div className="bg-white dark:bg-zinc-900 p-2.5 rounded-xl border border-amber-200 dark:border-amber-900/40 flex items-center justify-between">
-                    <span className="font-mono text-[11px] text-zinc-600 dark:text-zinc-300 truncate">
-                      /livestream
-                    </span>
-                    <span className="font-bold text-red-600 shrink-0 text-[11px]">
-                      {Math.round(liveUsersCount * 0.30)} watching
-                    </span>
-                  </div>
-
-                  <div className="bg-white dark:bg-zinc-900 p-2.5 rounded-xl border border-amber-200 dark:border-amber-900/40 flex items-center justify-between">
-                    <span className="font-mono text-[11px] text-zinc-600 dark:text-zinc-300 truncate">
-                      /checkout
-                    </span>
-                    <span className="font-bold text-amber-600 shrink-0 text-[11px]">
-                      {Math.round(liveUsersCount * 0.15)} buying
-                    </span>
-                  </div>
-                </div>
-              </div>
+            {/* Google Sheets Daily Backup — office/back-office data export,
+                once a day automatically + on-demand here. */}
+            <div className="bg-white dark:bg-zinc-900 rounded-3xl p-6 border border-zinc-200 dark:border-zinc-800 shadow-sm space-y-3">
+              <h3 className="font-serif font-bold text-lg text-zinc-900 dark:text-white flex items-center gap-2">
+                <FileText className="w-5 h-5 text-emerald-600" /> Google Sheets Backup
+              </h3>
+              <p className="text-xs text-zinc-500 dark:text-zinc-400">
+                Orders, Books, Coupons, Contact Messages, and Affiliate data export automatically to a
+                Google Sheet every day (one tab per data type), plus on-demand below. Requires
+                GOOGLE_SERVICE_ACCOUNT_EMAIL, GOOGLE_SERVICE_ACCOUNT_PRIVATE_KEY, and
+                GOOGLE_SHEETS_SPREADSHEET_ID to be set in Netlify environment variables.
+              </p>
+              <button
+                onClick={handleBackupNow}
+                disabled={isBackingUp}
+                className="bg-emerald-600 hover:bg-emerald-700 disabled:opacity-50 text-white font-bold text-xs px-4 py-2 rounded-xl flex items-center gap-2 w-fit"
+              >
+                <Download className="w-4 h-4" /> {isBackingUp ? 'Backing up...' : 'Backup Now'}
+              </button>
+              {backupStatus && (
+                <p className={`text-xs font-bold ${backupStatus.startsWith('Backup failed') ? 'text-rose-600' : 'text-emerald-600'}`}>
+                  {backupStatus}
+                </p>
+              )}
             </div>
 
             <div className="bg-white dark:bg-zinc-900 rounded-3xl p-6 border border-zinc-200 dark:border-zinc-800 shadow-sm space-y-4">
@@ -2742,21 +2499,64 @@ CREATE POLICY "Admin All Access" ON public.books FOR ALL USING (auth.role() = 'a
         {activeTab === 'coupons' && (
           <div className="bg-white dark:bg-zinc-900 rounded-3xl p-6 border border-zinc-200 dark:border-zinc-800 shadow-sm space-y-6">
             <h3 className="font-serif font-bold text-lg text-zinc-900 dark:text-white">Active Discount Vouchers</h3>
-            <form onSubmit={handleCreateCoupon} className="flex gap-2 max-w-md">
-              <input
-                type="text"
-                value={newCode}
-                onChange={e => setNewCode(e.target.value)}
-                placeholder="Voucher Code (e.g. SHIVA20)"
-                className="flex-1 px-3 py-2 bg-zinc-100 dark:bg-zinc-800 border rounded-xl text-xs uppercase font-mono"
-              />
-              <input
-                type="number"
-                value={newDiscount}
-                onChange={e => setNewDiscount(Number(e.target.value))}
-                placeholder="% Discount"
-                className="w-24 px-3 py-2 bg-zinc-100 dark:bg-zinc-800 border rounded-xl text-xs font-bold"
-              />
+            <form onSubmit={handleCreateCoupon} className="space-y-3 max-w-2xl">
+              <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+                <input
+                  type="text"
+                  value={newCode}
+                  onChange={e => setNewCode(e.target.value)}
+                  placeholder="Voucher Code (e.g. SHIVA20)"
+                  className="col-span-2 px-3 py-2 bg-zinc-100 dark:bg-zinc-800 border rounded-xl text-xs uppercase font-mono"
+                />
+                <select
+                  value={newDiscountType}
+                  onChange={e => setNewDiscountType(e.target.value as 'percentage' | 'fixed')}
+                  className="px-3 py-2 bg-zinc-100 dark:bg-zinc-800 border rounded-xl text-xs font-bold"
+                >
+                  <option value="percentage">% Off</option>
+                  <option value="fixed">₹ Flat Off</option>
+                </select>
+                <input
+                  type="number"
+                  value={newDiscount}
+                  onChange={e => setNewDiscount(Number(e.target.value))}
+                  placeholder={newDiscountType === 'percentage' ? '% Discount' : '₹ Discount'}
+                  className="px-3 py-2 bg-zinc-100 dark:bg-zinc-800 border rounded-xl text-xs font-bold"
+                />
+              </div>
+              <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
+                <div>
+                  <label className="text-[10px] font-bold text-zinc-500 block mb-1">Min. Order Value (₹)</label>
+                  <input
+                    type="number"
+                    value={newMinOrder}
+                    onChange={e => setNewMinOrder(Number(e.target.value))}
+                    className="w-full px-3 py-2 bg-zinc-100 dark:bg-zinc-800 border rounded-xl text-xs font-bold"
+                  />
+                </div>
+                <div>
+                  <label className="text-[10px] font-bold text-zinc-500 block mb-1">Expiry Date</label>
+                  <input
+                    type="date"
+                    value={newExpiryDate}
+                    onChange={e => setNewExpiryDate(e.target.value)}
+                    className="w-full px-3 py-2 bg-zinc-100 dark:bg-zinc-800 border rounded-xl text-xs font-bold"
+                  />
+                </div>
+                <div>
+                  <label className="text-[10px] font-bold text-zinc-500 block mb-1">Applies To</label>
+                  <select
+                    value={newCouponBookId}
+                    onChange={e => setNewCouponBookId(e.target.value)}
+                    className="w-full px-3 py-2 bg-zinc-100 dark:bg-zinc-800 border rounded-xl text-xs font-bold"
+                  >
+                    <option value="">Whole Order (any book)</option>
+                    {books.map(b => (
+                      <option key={b.id} value={b.id}>{b.title}</option>
+                    ))}
+                  </select>
+                </div>
+              </div>
               <button type="submit" className="bg-amber-600 text-white font-bold text-xs px-4 py-2 rounded-xl">
                 Add Voucher
               </button>
@@ -2767,7 +2567,13 @@ CREATE POLICY "Admin All Access" ON public.books FOR ALL USING (auth.role() = 'a
                 <div key={c.id} className="p-4 bg-zinc-50 dark:bg-zinc-800/40 rounded-2xl border border-zinc-200 dark:border-zinc-700 flex justify-between items-center">
                   <div>
                     <span className="font-mono font-bold text-sm text-amber-800 dark:text-amber-300">{c.code}</span>
-                    <p className="text-xs text-zinc-500">{c.discountValue}{c.discountType === 'percentage' ? '%' : '₹'} OFF • Min ₹{c.minOrderValue}</p>
+                    <p className="text-xs text-zinc-500">
+                      {c.discountValue}{c.discountType === 'percentage' ? '%' : '₹'} OFF • Min ₹{c.minOrderValue}
+                      {c.applicableBookId && (
+                        <> • {books.find(b => b.id === c.applicableBookId)?.title || 'specific book'} only</>
+                      )}
+                      {' '}• Expires {c.expiryDate}
+                    </p>
                   </div>
                   <button onClick={() => deleteCoupon(c.id)} className="text-rose-600">
                     <Trash2 className="w-4 h-4" />
@@ -3174,10 +2980,10 @@ CREATE POLICY "Admin All Access" ON public.books FOR ALL USING (auth.role() = 'a
                 <button
                   type="button"
                   onClick={() => {
-                    setSeoTitle('Dharma Books Pro | Authentic Sacred Scriptures & Vedic Literature');
+                    setSeoTitle('Shakti Se Shanti Tak | Authentic Sacred Scriptures & Vedic Literature');
                     setSeoDesc('Buy authentic Sanskrit scriptures, Bhagavad Gita, Upanishads, Vedas, Puranas, Ramayana, and Stotras with Hindi & English translation. Fast express delivery.');
                     setSeoKeywords('Bhagavad Gita, Upanishads, Vedas, Sanskrit books, Sanatana Dharma, Spiritual books online, Stotras, Sacred Texts');
-                    setSeoCanonical('https://dharmabooks.org');
+                    setSeoCanonical('https://shaktiseshanti.com');
                     triggerToast('Reset to High-Rank SEO Defaults!');
                   }}
                   className="px-3 py-1.5 bg-zinc-100 dark:bg-zinc-800 text-zinc-700 dark:text-zinc-300 text-xs font-semibold rounded-xl hover:bg-zinc-200 transition-colors"
@@ -3205,7 +3011,7 @@ CREATE POLICY "Admin All Access" ON public.books FOR ALL USING (auth.role() = 'a
                     required
                     value={seoTitle}
                     onChange={e => setSeoTitle(e.target.value)}
-                    placeholder="e.g. Dharma Books Pro | Authentic Sacred Scriptures & Vedic Literature"
+                    placeholder="e.g. Shakti Se Shanti Tak | Authentic Sacred Scriptures & Vedic Literature"
                     className="w-full px-3.5 py-2.5 bg-zinc-50 dark:bg-zinc-800 border border-zinc-200 dark:border-zinc-700 rounded-xl font-medium focus:ring-2 focus:ring-amber-500 outline-none"
                   />
                   <p className="text-[10px] text-zinc-400 mt-1">Appears as the main blue link title on Google and Bing search results.</p>
@@ -3257,7 +3063,7 @@ CREATE POLICY "Admin All Access" ON public.books FOR ALL USING (auth.role() = 'a
                       type="url"
                       value={seoCanonical}
                       onChange={e => setSeoCanonical(e.target.value)}
-                      placeholder="https://dharmabooks.org"
+                      placeholder="https://shaktiseshanti.com"
                       className="w-full px-3.5 py-2 bg-zinc-50 dark:bg-zinc-800 border border-zinc-200 dark:border-zinc-700 rounded-xl font-mono text-xs"
                     />
                   </div>
@@ -3362,7 +3168,7 @@ CREATE POLICY "Admin All Access" ON public.books FOR ALL USING (auth.role() = 'a
                     </div>
 
                     <h4 className="font-sans font-semibold text-base text-blue-700 dark:text-blue-400 hover:underline cursor-pointer leading-tight pt-0.5">
-                      {seoTitle || 'Dharma Books Pro'}
+                      {seoTitle || 'Shakti Se Shanti Tak'}
                     </h4>
 
                     <p className="text-xs text-zinc-600 dark:text-zinc-400 leading-relaxed pt-1">
@@ -4193,7 +3999,7 @@ CREATE POLICY "Admin All Access" ON public.books FOR ALL USING (auth.role() = 'a
                   <div className="p-3 bg-white dark:bg-zinc-900 rounded-xl border border-zinc-200 dark:border-zinc-800 space-y-1">
                     <span className="text-[9px] font-mono text-zinc-400 uppercase tracking-wider">Book Google Search Preview</span>
                     <p className="font-semibold text-xs text-blue-700 dark:text-blue-400 hover:underline cursor-pointer">
-                      {formBookSeoTitle || `${formTitle || 'Book Title'} ${formOrigTitle ? `(${formOrigTitle})` : ''} - ${formAuthor || 'Author'} | Dharma Books`}
+                      {formBookSeoTitle || `${formTitle || 'Book Title'} ${formOrigTitle ? `(${formOrigTitle})` : ''} - ${formAuthor || 'Author'} | Shakti Se Shanti Tak`}
                     </p>
                     <p className="text-[11px] text-zinc-600 dark:text-zinc-400 line-clamp-2">
                       {formBookSeoDesc || formDesc || 'Pristine Sanskrit text with English translation and commentary.'}

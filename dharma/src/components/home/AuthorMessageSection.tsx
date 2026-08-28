@@ -32,7 +32,7 @@ export const AuthorMessageSection: React.FC = () => {
             </h2>
 
             <p className="text-sm sm:text-base text-amber-200/90 leading-relaxed font-light">
-              Our mission at Dharma Books Pro is to publish flawless editions of the Bhagavad Gita, Upanishads, and Ramayana without alteration or commercial compromise. Every volume is printed with pristine Sanskrit Devanagari fonts, gold gilding, and clear word-for-word commentary so that modern seekers can experience the original clarity of ancient rishis.
+              Our mission at Shakti Se Shanti Tak (शक्ति से शांति तक) is to publish flawless editions of the Bhagavad Gita, Upanishads, and Ramayana without alteration or commercial compromise. Every volume is printed with pristine Sanskrit Devanagari fonts, gold gilding, and clear word-for-word commentary so that modern seekers can experience the original clarity of ancient rishis.
             </p>
 
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 pt-4 border-t border-amber-800/80 text-xs text-amber-200">

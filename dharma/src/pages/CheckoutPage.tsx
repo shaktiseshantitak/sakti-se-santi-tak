@@ -150,7 +150,7 @@ export const CheckoutPage: React.FC<CheckoutPageProps> = ({ onNavigate }) => {
                 key: payData.keyId,
                 amount: payData.amount,
                 currency: payData.currency,
-                name: 'Dharma Books Pro',
+                name: 'Shakti Se Shanti Tak',
                 description: `Order Payment #${apiResult.orderNumber}`,
                 order_id: payData.id,
                 prefill: {

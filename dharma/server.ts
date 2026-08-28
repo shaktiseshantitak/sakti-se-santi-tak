@@ -3,6 +3,7 @@ import path from 'path';
 import crypto from 'crypto';
 import { createClient } from '@supabase/supabase-js';
 import { S3Client, PutObjectCommand } from '@aws-sdk/client-s3';
+import { runDailyBackup } from './src/lib/googleSheetsBackup';
 
 const app = express();
 const PORT = 3000;
@@ -54,28 +55,72 @@ app.use((req: Request, res: Response, next: NextFunction) => {
   next();
 });
 
+// FIXED (security audit — in-memory rate limiting is unsafe under
+// Netlify's serverless architecture): the counters below now live in
+// Postgres via check_and_increment_rate_limit (migration 012), which is
+// shared by every function instance, instead of a local Map that a
+// concurrent request could land on a fresh copy of. The in-memory Maps
+// are kept ONLY as a same-behavior fallback for local/dev use when
+// Supabase isn't configured at all (e.g. previewing the UI with no
+// backend wired up yet) — never a silent substitute in production, since
+// supabaseServer is set from real deployment env vars whenever they're
+// present.
+async function enforceRateLimit(
+  key: string,
+  maxRequests: number,
+  windowSeconds: number,
+  fallbackMap: Map<string, { count: number; resetTime: number }>
+): Promise<{ allowed: boolean; retryAfterSeconds: number }> {
+  if (supabaseServer) {
+    try {
+      const { data, error } = await supabaseServer.rpc('check_and_increment_rate_limit', {
+        p_key: key,
+        p_max_requests: maxRequests,
+        p_window_seconds: windowSeconds,
+      });
+      if (!error && data && data[0]) {
+        return { allowed: Boolean(data[0].allowed), retryAfterSeconds: Number(data[0].retry_after_seconds || 0) };
+      }
+      console.error('[Rate Limit] RPC error, failing open for this request:', error);
+      // Fails OPEN (allows the request) rather than blocking real traffic
+      // if Postgres itself is briefly unreachable — an outage in the rate
+      // limiter shouldn't take down checkout/login entirely.
+      return { allowed: true, retryAfterSeconds: 0 };
+    } catch (err) {
+      console.error('[Rate Limit] RPC exception, failing open for this request:', err);
+      return { allowed: true, retryAfterSeconds: 0 };
+    }
+  }
+
+  // Local in-memory fallback (dev/preview only — see note above).
+  const now = Date.now();
+  const record = fallbackMap.get(key);
+  if (!record || now > record.resetTime) {
+    fallbackMap.set(key, { count: 1, resetTime: now + windowSeconds * 1000 });
+    return { allowed: true, retryAfterSeconds: 0 };
+  }
+  if (record.count >= maxRequests) {
+    return { allowed: false, retryAfterSeconds: Math.ceil((record.resetTime - now) / 1000) };
+  }
+  record.count += 1;
+  return { allowed: true, retryAfterSeconds: 0 };
+}
+
 // Rate limiting for API endpoints
 const rateLimitWindowMs = 60 * 1000; // 1 minute
 const maxRequestsPerWindow = 60;
 const ipRequestCounts = new Map<string, { count: number; resetTime: number }>();
 
-const rateLimiter = (req: Request, res: Response, next: NextFunction) => {
+const rateLimiter = async (req: Request, res: Response, next: NextFunction) => {
   const ip = req.ip || req.socket.remoteAddress || 'unknown';
-  const now = Date.now();
-  const record = ipRequestCounts.get(ip);
+  const { allowed } = await enforceRateLimit(`api:${ip}`, maxRequestsPerWindow, rateLimitWindowMs / 1000, ipRequestCounts);
 
-  if (!record || now > record.resetTime) {
-    ipRequestCounts.set(ip, { count: 1, resetTime: now + rateLimitWindowMs });
-    return next();
-  }
-
-  if (record.count >= maxRequestsPerWindow) {
+  if (!allowed) {
     return res.status(429).json({
       error: 'Too many requests. Please try again in 1 minute.',
     });
   }
 
-  record.count += 1;
   next();
 };
 
@@ -86,21 +131,17 @@ const authRateLimitWindowMs = 15 * 60 * 1000; // 15 minutes
 const maxAuthRequestsPerWindow = 5;
 const authAttemptCounts = new Map<string, { count: number; resetTime: number }>();
 
-const authRateLimiter = (req: Request, res: Response, next: NextFunction) => {
+const authRateLimiter = async (req: Request, res: Response, next: NextFunction) => {
   const rawIp = (req.headers['x-forwarded-for'] as string || req.socket.remoteAddress || 'unknown').split(',')[0].trim();
   const email = (req.body?.email || req.body?.username || 'anonymous').toLowerCase().trim();
-  const compositeKey = `${rawIp}:${email}`;
-  const now = Date.now();
+  const compositeKey = `auth:${rawIp}:${email}`;
 
-  const record = authAttemptCounts.get(compositeKey);
+  const { allowed, retryAfterSeconds } = await enforceRateLimit(
+    compositeKey, maxAuthRequestsPerWindow, authRateLimitWindowMs / 1000, authAttemptCounts
+  );
 
-  if (!record || now > record.resetTime) {
-    authAttemptCounts.set(compositeKey, { count: 1, resetTime: now + authRateLimitWindowMs });
-    return next();
-  }
-
-  if (record.count >= maxAuthRequestsPerWindow) {
-    const minutesLeft = Math.ceil((record.resetTime - now) / (60 * 1000));
+  if (!allowed) {
+    const minutesLeft = Math.ceil(retryAfterSeconds / 60);
     return res.status(429).json({
       error: `Too many login/MFA verification attempts. Account security lockout active. Please try again in ${minutesLeft} minute(s).`,
       lockout: true,
@@ -108,7 +149,6 @@ const authRateLimiter = (req: Request, res: Response, next: NextFunction) => {
     });
   }
 
-  record.count += 1;
   next();
 };
 
@@ -170,6 +210,34 @@ app.get('/api/health', (req: Request, res: Response) => {
     supabaseConnected: Boolean(supabaseServer),
     timestamp: new Date().toISOString(),
   });
+});
+
+// ==========================================
+// 1B. GOOGLE SHEETS DAILY BACKUP (admin-triggered + scheduled)
+// ==========================================
+// Runs once a day automatically (see netlify/functions/daily-backup.ts,
+// scheduled via netlify.toml), and can also be triggered on demand from
+// the admin panel's "Backup Now" button. Requires admin auth for the
+// manual trigger — the scheduled function calls runDailyBackup() directly
+// and doesn't go through this HTTP route at all.
+app.post('/api/admin/backup-now', async (req: Request, res: Response) => {
+  try {
+    const user = await authenticateUser(req);
+    if (!user) return res.status(401).json({ error: 'Authentication required.' });
+    if (!supabaseServer) return res.status(500).json({ error: 'Database not configured.' });
+
+    const { data: roleRow } = await supabaseServer
+      .from('user_roles').select('role').eq('user_id', user.id).single();
+    if (roleRow?.role !== 'admin') {
+      return res.status(403).json({ error: 'Admin privileges required.' });
+    }
+
+    const results = await runDailyBackup(supabaseServer);
+    return res.json({ success: true, results });
+  } catch (err: any) {
+    console.error('[Backup Now] Failed:', err);
+    return res.status(500).json({ error: err.message || 'Backup failed. Check server logs.' });
+  }
 });
 
 // ==========================================
@@ -259,8 +327,12 @@ app.post('/api/orders/create', async (req: Request, res: Response) => {
       const isExpired = coupon?.expires_at && new Date(coupon.expires_at) < new Date();
       const belowMinOrder = coupon && calculatedSubtotal < Number(coupon.min_order_amount || 0);
       const usageExhausted = coupon?.usage_limit != null && Number(coupon.times_used || 0) >= Number(coupon.usage_limit);
+      // Migration 014: product-scoped coupons. Re-checked here server-side —
+      // never trust the client's claim that the restricted book was in cart.
+      const wrongProduct = coupon?.applicable_book_id &&
+        !items.some((it: any) => it.bookId === coupon.applicable_book_id);
 
-      if (coupon && !isExpired && !belowMinOrder && !usageExhausted) {
+      if (coupon && !isExpired && !belowMinOrder && !usageExhausted && !wrongProduct) {
         appliedCouponId = coupon.id;
         if (coupon.discount_type === 'percentage') {
           discountAmount = Math.round(calculatedSubtotal * (coupon.discount_value / 100) * 100) / 100;
@@ -686,26 +758,17 @@ app.post('/api/payment/webhook', async (req: Request, res: Response) => {
 // ==========================================
 // 5. SECURE ORDER TRACKING (RATE-LIMITED, IDOR-PROTECTED)
 // ==========================================
-const trackRateLimitMap = new Map<string, { count: number; resetAt: number }>();
+const trackRateLimitMap = new Map<string, { count: number; resetTime: number }>();
 
-function checkRateLimit(ip: string): boolean {
-  const now = Date.now();
-  const record = trackRateLimitMap.get(ip);
-  if (!record || now > record.resetAt) {
-    trackRateLimitMap.set(ip, { count: 1, resetAt: now + 15 * 60 * 1000 });
-    return true;
-  }
-  if (record.count >= 10) {
-    return false;
-  }
-  record.count += 1;
-  return true;
+async function checkTrackRateLimit(ip: string): Promise<boolean> {
+  const { allowed } = await enforceRateLimit(`track:${ip}`, 10, 15 * 60, trackRateLimitMap);
+  return allowed;
 }
 
 app.post('/api/orders/track', async (req: Request, res: Response) => {
   try {
     const clientIp = (req.headers['x-forwarded-for'] as string || req.socket.remoteAddress || 'unknown').split(',')[0].trim();
-    if (!checkRateLimit(clientIp)) {
+    if (!(await checkTrackRateLimit(clientIp))) {
       return res.status(429).json({ error: 'Too many order tracking attempts. Please try again in 15 minutes.' });
     }
 
@@ -944,10 +1007,16 @@ app.post('/api/media/upload', async (req: Request, res: Response) => {
     });
 
   } catch (err: any) {
+    // FIXED (security audit — debug info in production): this used to
+    // include `err.message` directly in the JSON response sent to the
+    // browser. For an R2/S3 SDK error, that can include internal details
+    // (endpoint hostnames, bucket configuration hints, etc.) that have no
+    // reason to reach an untrusted client. Full detail still goes to the
+    // server log for debugging; the client only gets a generic message.
     console.error('[R2 Media Upload Error]:', err);
     return res.status(500).json({
       success: false,
-      error: `Failed to upload file to Cloudflare R2: ${err.message || 'Unknown server error'}`
+      error: 'Failed to upload file. Please try again, or contact support if the problem continues.'
     });
   }
 });

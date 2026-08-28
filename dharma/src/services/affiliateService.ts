@@ -112,93 +112,20 @@ const EMPTY_STATS: AffiliateDashboardStats = {
   monthlyIncome: 0,
 };
 
-const INITIAL_COMMISSIONS: CommissionRecord[] = [
-  {
-    id: 'COMM-8801',
-    orderId: 'ORD-99821',
-    buyerName: 'Dr. Harihar Trivedi',
-    orderAmount: 2499,
-    level: 1,
-    ratePercent: 10,
-    commissionAmount: 249.9,
-    status: 'approved',
-    createdAt: '2026-07-28 14:30',
-  },
-  {
-    id: 'COMM-8802',
-    orderId: 'ORD-99845',
-    buyerName: 'Smt. Gayatri Mishra',
-    orderAmount: 499,
-    level: 1,
-    ratePercent: 10,
-    commissionAmount: 49.9,
-    status: 'pending',
-    createdAt: '2026-08-01 10:15',
-  },
-  {
-    id: 'COMM-8803',
-    orderId: 'ORD-99890',
-    buyerName: 'Acharya Balkrishna',
-    orderAmount: 1499,
-    level: 2,
-    ratePercent: 5,
-    commissionAmount: 74.95,
-    status: 'approved',
-    createdAt: '2026-08-04 16:45',
-  },
-];
+// FIXED: these four arrays used to be seeded with fake sample rows
+// ('Acharya Rahul Sharma', 'COMM-8801', a hardcoded leaderboard, etc.)
+// that showed up for literally every visitor — logged in or not — any
+// time localStorage / Supabase had no real rows yet. That's what was
+// being reported as "dummy data on the affiliate page even after
+// login". A brand-new (or logged-out) affiliate should see genuinely
+// empty lists, matching EMPTY_WALLET / EMPTY_STATS above.
+const INITIAL_COMMISSIONS: CommissionRecord[] = [];
 
-const INITIAL_WITHDRAWALS: WithdrawalRequest[] = [
-  {
-    id: 'WTH-501',
-    userId: 'user-default',
-    userName: 'Acharya Rahul Sharma',
-    amount: 5000,
-    method: 'upi',
-    details: { upiId: 'rahulsharma@okaxis' },
-    status: 'paid',
-    requestedAt: '2026-07-10 11:20',
-    processedAt: '2026-07-10 14:00',
-    transactionId: 'UPI-TXN-99887711',
-    adminNote: 'Transfer successful to verified UPI ID.',
-  },
-  {
-    id: 'WTH-502',
-    userId: 'user-default',
-    userName: 'Acharya Rahul Sharma',
-    amount: 3500,
-    method: 'bank',
-    details: {
-      accountNumber: 'XXXXXX9821',
-      ifscCode: 'SBIN0001234',
-      bankName: 'State Bank of India',
-      holderName: 'Rahul Sharma',
-    },
-    status: 'pending',
-    requestedAt: '2026-08-05 09:10',
-  },
-];
+const INITIAL_WITHDRAWALS: WithdrawalRequest[] = [];
 
-const INITIAL_FRAUD_LOGS: FraudAuditLog[] = [
-  {
-    id: 'FRD-101',
-    userId: 'user-9912',
-    userName: 'Guest Browser 412',
-    ipAddress: '192.168.1.45',
-    eventType: 'self_referral_blocked',
-    severity: 'medium',
-    details: 'User attempted to purchase using their own referral code SHAKTI-R9872.',
-    timestamp: '2026-08-02 18:22:10',
-  },
-];
+const INITIAL_FRAUD_LOGS: FraudAuditLog[] = [];
 
-const INITIAL_LEADERBOARD: LeaderboardUser[] = [
-  { rank: 1, userName: 'Acharya Rahul Sharma', monthlyVolume: 125000, monthlyCommissions: 12500, tier: 'Gold' },
-  { rank: 2, userName: 'Pandit Rameshwar Shastri', monthlyVolume: 98000, monthlyCommissions: 9800, tier: 'Silver' },
-  { rank: 3, userName: 'Sadhvi Sunita Devi', monthlyVolume: 74000, monthlyCommissions: 740, tier: 'Silver' },
-  { rank: 4, userName: 'Shri Anand Prakash', monthlyVolume: 51000, monthlyCommissions: 5100, tier: 'Bronze' },
-  { rank: 5, userName: 'Swami Dayanand', monthlyVolume: 39000, monthlyCommissions: 3900, tier: 'Bronze' },
-];
+const INITIAL_LEADERBOARD: LeaderboardUser[] = [];
 
 export class AffiliateService {
   /**

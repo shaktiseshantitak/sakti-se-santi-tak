@@ -190,6 +190,46 @@ export const AffiliateProvider: React.FC<{ children: React.ReactNode }> = ({ chi
           setTeam(mappedTeam);
         }
       });
+
+      // Real per-order commission history — read directly from
+      // affiliate_wallet_ledger (RLS already lets an affiliate read their
+      // own rows: "Affiliates view own ledger"). Previously this tab
+      // called AffiliateService.getCommissions(), which only ever read
+      // localStorage and fell back to hardcoded sample rows ('Dr. Harihar
+      // Trivedi', 'COMM-8801'...) — real DB-backed activity never showed
+      // up here at all, which is exactly the "dummy data even after
+      // login" bug. Buyer identity is intentionally NOT shown (the
+      // referred customer's name isn't the affiliate's data to see);
+      // migration 010's credit_affiliate_commission deliberately keeps
+      // the description limited to the level and order number.
+      supabase
+        .from('affiliate_wallet_ledger')
+        .select('*')
+        .eq('affiliate_user_id', user.id)
+        .eq('entry_type', 'COMMISSION')
+        .order('created_at', { ascending: false })
+        .then(({ data: ledgerRows, error }) => {
+          if (!error && Array.isArray(ledgerRows)) {
+            const levelRatePercent: Record<number, number> = { 1: 10, 2: 5, 3: 2.5 };
+            const mappedCommissions: CommissionRecord[] = ledgerRows.map((row: any) => {
+              const levelMatch = /Level (\d+)/.exec(row.description || '');
+              const level = levelMatch ? Number(levelMatch[1]) : 1;
+              const orderMatch = /order\s+(\S+)/.exec(row.description || '');
+              return {
+                id: row.id,
+                orderId: orderMatch ? orderMatch[1] : (row.reference_order_id || ''),
+                buyerName: 'Referred Customer',
+                orderAmount: 0,
+                level,
+                ratePercent: levelRatePercent[level] ?? 0,
+                commissionAmount: Number(row.amount || 0),
+                status: 'approved',
+                createdAt: row.created_at ? row.created_at.replace('T', ' ').slice(0, 16) : '',
+              };
+            });
+            setCommissions(mappedCommissions);
+          }
+        });
     }
 
     // Always keep local state fresh

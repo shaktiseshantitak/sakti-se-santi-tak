@@ -17,10 +17,10 @@ export const AboutPage: React.FC<AboutPageProps> = ({ onNavigate }) => {
             Varanasi Publishing Heritage
           </span>
           <h1 className="font-serif text-3xl sm:text-4xl font-bold text-[#8B1E3F]">
-            About Dharma Books Pro
+            About Shakti Se Shanti Tak
           </h1>
           <p className="text-xs sm:text-sm text-[#6E4E37] max-w-xl mx-auto leading-relaxed font-medium">
-            Established on the holy banks of Assi Ghat in Varanasi, Dharma Books Pro is dedicated to publishing, preserving, and distributing authentic Sanatana Dharma scriptures worldwide.
+            Established on the holy banks of Assi Ghat in Varanasi, Shakti Se Shanti Tak (शक्ति से शांति तक) is dedicated to publishing, preserving, and distributing authentic Sanatana Dharma scriptures worldwide.
           </p>
         </div>
 
@@ -40,7 +40,7 @@ export const AboutPage: React.FC<AboutPageProps> = ({ onNavigate }) => {
               Ancient rishis composed the Vedas, Upanishads, and Gita for the spiritual elevation of all humanity. In an era of rapid digital summaries, authentic hardbound scriptures with word-for-word Sanskrit Devanagari commentary remain the gold standard for deep study.
             </p>
             <p>
-              Every title produced by Dharma Books Pro undergoes a rigorous multi-stage review process involving traditional Sanskrit pundits, philologists, and master bookbinders.
+              Every title produced by Shakti Se Shanti Tak undergoes a rigorous multi-stage review process involving traditional Sanskrit pundits, philologists, and master bookbinders.
             </p>
           </div>
 
@@ -63,6 +63,10 @@ export const AboutPage: React.FC<AboutPageProps> = ({ onNavigate }) => {
               <p className="text-xs text-[#6E4E37]">Delivering sacred books to seekers and ashrams in 85+ countries.</p>
             </div>
           </div>
+
+          <p className="text-center text-[11px] text-[#6E4E37]/70 pt-4 border-t border-[#D4AF37]/20">
+            Website Developed &amp; Deployed by Mr. Sitaram Ghintala
+          </p>
         </div>
       </div>
     </div>

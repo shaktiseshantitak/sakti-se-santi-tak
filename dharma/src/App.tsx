@@ -1,6 +1,6 @@
 import React, { useState, useEffect, lazy, Suspense } from 'react';
 import { ThemeProvider } from './context/ThemeContext';
-import { AuthProvider } from './context/AuthContext';
+import { AuthProvider, useAuth } from './context/AuthContext';
 import { BookProvider, useBooks } from './context/BookContext';
 import { CartProvider, useCart } from './context/CartContext';
 import { LiveStreamProvider, useLiveStream } from './context/LiveStreamContext';
@@ -14,6 +14,7 @@ import { LiveStreamBanner } from './components/livestream/LiveStreamBanner';
 import { LiveStreamPlayerModal } from './components/livestream/LiveStreamPlayerModal';
 import { LiveStreamStudioModal } from './components/livestream/LiveStreamStudioModal';
 import { SeoHead } from './components/common/SeoHead';
+import { TopProgressBar, OmMandalaLoader } from './components/common/PageTransitionLoader';
 
 // Eager HomePage import for fast first paint
 import { HomePage } from './pages/HomePage';
@@ -50,12 +51,7 @@ const EnterpriseCmsInjector = lazy(() => import('./components/common/EnterpriseC
 
 import { Book, BlogPost, LiveStream } from './types';
 
-const PageFallback = () => (
-  <div className="min-h-[60vh] flex flex-col items-center justify-center p-8 bg-[#F8F4E8] text-[#8B1E3F]">
-    <div className="w-10 h-10 border-3 border-[#D4AF37]/30 border-t-[#8B1E3F] rounded-full animate-spin mb-4" />
-    <span className="font-serif font-bold text-sm tracking-widest text-[#4A2C17]">सामग्री लोड हो रही है...</span>
-  </div>
-);
+const PageFallback = () => <OmMandalaLoader />;
 
 // Real URL path <-> in-app page-name mapping, kept at module scope since it's
 // static (doesn't depend on any component state/props). See the note in
@@ -101,6 +97,7 @@ const PAGE_TO_PATH: Record<string, string> = Object.fromEntries(
 
 const MainAppContent: React.FC = () => {
   const { books, blogs } = useBooks();
+  const { sessionTimedOut, clearSessionTimedOut } = useAuth();
   // NOTE: referral-click tracking is already handled inside AffiliateContext's own
   // useEffect (it reads ?ref=/?aff= itself via AffiliateService.handleReferralClick).
   // This component used to also destructure `recordReferralClick` from useAffiliate()
@@ -120,6 +117,15 @@ const MainAppContent: React.FC = () => {
   const [isLivePlayerOpen, setIsLivePlayerOpen] = useState<boolean>(false);
   const [isLiveStudioOpen, setIsLiveStudioOpen] = useState<boolean>(false);
   const [selectedStreamForPlayer, setSelectedStreamForPlayer] = useState<LiveStream | null>(null);
+  const [showIdleLogoutBanner, setShowIdleLogoutBanner] = useState<boolean>(false);
+  // FIXED ("app mein loader nahi hai" — no feedback between page clicks):
+  // isPageTransitioning flips true the instant handleNavigate() runs and
+  // false a short beat after the destination page has mounted, driving
+  // TopProgressBar below. Suspense's fallback only covers the case where a
+  // lazy page's JS chunk is still downloading; this covers every single
+  // navigation, including ones where the chunk is already cached and
+  // Suspense never engages at all — which was the majority of clicks.
+  const [isPageTransitioning, setIsPageTransitioning] = useState<boolean>(false);
 
   // NOTE: this app previously had NO real URL routing at all — `currentPage`
   // was pure in-memory React state, always starting at 'home' regardless of
@@ -147,7 +153,25 @@ const MainAppContent: React.FC = () => {
     return () => window.removeEventListener('popstate', handlePopState);
   }, []);
 
+  // FIXED (auto-logout / idle timeout): AuthContext's idle timer signs the
+  // person out after 15 minutes of no activity, but silently landing on a
+  // login form with zero explanation is confusing — they'd assume
+  // something broke. This sends them to /login with a clear "you were
+  // logged out due to inactivity" banner instead.
+  useEffect(() => {
+    if (sessionTimedOut) {
+      handleNavigate('login');
+      clearSessionTimedOut();
+      setShowIdleLogoutBanner(true);
+      window.setTimeout(() => setShowIdleLogoutBanner(false), 8000);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [sessionTimedOut]);
+
   const handleNavigate = (page: string, params: Record<string, any> = {}) => {
+    if (page !== currentPage) {
+      setIsPageTransitioning(true);
+    }
     setCurrentPage(page);
     setPageParams(params);
     const path = PAGE_TO_PATH[page];
@@ -156,6 +180,14 @@ const MainAppContent: React.FC = () => {
     }
     window.scrollTo({ top: 0, behavior: 'smooth' });
   };
+
+  // Clears the transitioning flag a short beat after the target page has
+  // mounted — long enough to read as a deliberate, on-brand transition
+  // rather than a flicker, short enough not to feel like a fake delay.
+  useEffect(() => {
+    const t = window.setTimeout(() => setIsPageTransitioning(false), 450);
+    return () => window.clearTimeout(t);
+  }, [currentPage]);
 
   const handleSelectBook = (book: Book) => {
     setSelectedBook(book);
@@ -179,12 +211,22 @@ const MainAppContent: React.FC = () => {
 
   return (
     <div className="min-h-screen flex flex-col bg-zinc-50 dark:bg-zinc-950 text-zinc-900 dark:text-zinc-100 font-sans selection:bg-amber-500 selection:text-white transition-colors">
+      {/* Instant feedback on every navigation click — see isPageTransitioning */}
+      <TopProgressBar active={isPageTransitioning} />
+
       {/* Inbuilt SEO & Head Manager */}
       <SeoHead
         currentPage={currentPage}
         currentBook={currentPage === 'book-details' ? (selectedBook || books[0]) : null}
         currentBlog={currentPage === 'blog-post' ? (selectedBlog || blogs[0]) : null}
       />
+
+      {/* Idle-timeout auto-logout notice */}
+      {showIdleLogoutBanner && (
+        <div className="bg-[#8B1E3F] text-white text-xs sm:text-sm font-medium text-center py-2.5 px-4">
+          You were logged out due to 15 minutes of inactivity, for your account's security. Please log in again.
+        </div>
+      )}
 
       {/* Top Navbar */}
       <Navbar

@@ -47,8 +47,12 @@ export const CartProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const { user } = useAuth();
 
   const [cart, setCart] = useState<CartItem[]>(() => getLocalData<CartItem[]>('cart_items', []));
+  // FIXED: every brand-new visitor/browser used to start with 'book-1' and
+  // 'book-4' already sitting in their wishlist — fake pre-filled data with
+  // no relation to anything the person actually did. A wishlist should
+  // start genuinely empty.
   const [wishlistBookIds, setWishlistBookIds] = useState<string[]>(() =>
-    getLocalData<string[]>('wishlist_ids', ['book-1', 'book-4'])
+    getLocalData<string[]>('wishlist_ids', [])
   );
   const [recentlyViewedBookIds, setRecentlyViewedBookIds] = useState<string[]>(() =>
     getLocalData<string[]>('recently_viewed', ['book-1', 'book-2'])
@@ -215,6 +219,11 @@ export const CartProvider: React.FC<{ children: React.ReactNode }> = ({ children
         success: false,
         message: `Minimum order value for ${found.code} is ₹${found.minOrderValue}. Add ₹${found.minOrderValue - subtotal} more to apply.`,
       };
+    }
+    // Product-scoped coupons (migration 014) only apply if the cart
+    // actually contains the one book they were created for.
+    if (found.applicableBookId && !cart.some(item => item.book.id === found.applicableBookId)) {
+      return { success: false, message: `${found.code} only applies to a specific book that isn't in your cart.` };
     }
 
     setAppliedCoupon(found);

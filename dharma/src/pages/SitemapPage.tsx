@@ -15,24 +15,24 @@ export const SitemapPage: React.FC<SitemapPageProps> = ({ onNavigate }) => {
   const xmlSitemap = `<?xml version="1.0" encoding="UTF-8"?>
 <urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
   <url>
-    <loc>https://dharmabooks.pro/</loc>
+    <loc>https://shaktiseshanti.com/</loc>
     <changefreq>daily</changefreq>
     <priority>1.0</priority>
   </url>
   <url>
-    <loc>https://dharmabooks.pro/books</loc>
+    <loc>https://shaktiseshanti.com/books</loc>
     <changefreq>daily</changefreq>
     <priority>0.9</priority>
   </url>
   ${categories.map(c => `
   <url>
-    <loc>https://dharmabooks.pro/books/${c.slug}</loc>
+    <loc>https://shaktiseshanti.com/books/${c.slug}</loc>
     <changefreq>weekly</changefreq>
     <priority>0.8</priority>
   </url>`).join('')}
   ${books.map(b => `
   <url>
-    <loc>https://dharmabooks.pro/book/${b.id}</loc>
+    <loc>https://shaktiseshanti.com/book/${b.id}</loc>
     <changefreq>monthly</changefreq>
     <priority>0.7</priority>
   </url>`).join('')}
@@ -41,9 +41,9 @@ export const SitemapPage: React.FC<SitemapPageProps> = ({ onNavigate }) => {
   const schemaJsonLd = {
     "@context": "https://schema.org",
     "@type": "BookStore",
-    "name": "Dharma Books Pro",
+    "name": "Shakti Se Shanti Tak",
     "description": "Sacred scripture publishing house in Varanasi",
-    "url": "https://dharmabooks.pro",
+    "url": "https://shaktiseshanti.com",
     "address": {
       "@type": "PostalAddress",
       "streetAddress": "Assi Ghat Road",

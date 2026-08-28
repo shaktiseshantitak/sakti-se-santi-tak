@@ -24,7 +24,7 @@ export const PoliciesPage: React.FC<PoliciesPageProps> = ({ type, onNavigate }) 
           <h1 className="font-serif text-3xl font-bold text-[#8B1E3F]">
             {titles[type]}
           </h1>
-          <p className="text-xs text-[#6E4E37] font-medium mt-1">Last Updated: August 2024 • Dharma Books Pro Varanasi Desk</p>
+          <p className="text-xs text-[#6E4E37] font-medium mt-1">Last Updated: August 2024 • Shakti Se Shanti Tak Varanasi Desk</p>
         </div>
 
         <div className="bg-[#FFF8EE] rounded-3xl p-8 border border-[#D4AF37]/40 shadow-sm space-y-6 my-6 text-xs sm:text-sm text-[#4A2C17] leading-relaxed font-medium">
@@ -54,7 +54,7 @@ export const PoliciesPage: React.FC<PoliciesPageProps> = ({ type, onNavigate }) 
           {type === 'terms' && (
             <>
               <h3 className="font-serif font-bold text-lg text-[#8B1E3F]">1. Sacred Copyright & Re-Printing</h3>
-              <p>The English translations, word-by-word Sanskrit commentaries, and custom layouts in our books are copyrighted by Dharma Books Pro. Commercial reproduction without prior written permission is prohibited.</p>
+              <p>The English translations, word-by-word Sanskrit commentaries, and custom layouts in our books are copyrighted by Shakti Se Shanti Tak (shaktiseshanti.com). Commercial reproduction without prior written permission is prohibited.</p>
             </>
           )}
         </div>

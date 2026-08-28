@@ -9,6 +9,14 @@
 [functions]
   directory = "netlify/functions"
 
+# Runs the Google Sheets backup once a day automatically (see
+# netlify/functions/daily-backup.ts). Requires GOOGLE_SERVICE_ACCOUNT_EMAIL,
+# GOOGLE_SERVICE_ACCOUNT_PRIVATE_KEY, and GOOGLE_SHEETS_SPREADSHEET_ID to be
+# set in Netlify's environment variables — without them this function exits
+# early and logs a warning, it does not fail the deploy.
+[functions."daily-backup"]
+  schedule = "0 20 * * *"
+
 # Netlify Serverless Function API Redirect
 [[redirects]]
   from = "/api/*"

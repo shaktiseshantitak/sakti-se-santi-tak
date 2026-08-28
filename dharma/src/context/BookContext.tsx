@@ -39,7 +39,7 @@ function mapDbBookToBook(row: any): Book {
     description: row.description || '',
     longDescription: row.description || '',
     isbn: '978-81-900000-0-0',
-    publisher: 'Dharma Books Publishing',
+    publisher: 'Shakti Se Shanti Sansthan',
     publicationYear: 2024,
     edition: 'First Edition',
     pages: 350,
@@ -101,6 +101,7 @@ function mapDbCouponToCoupon(row: any): Coupon {
     expiryDate: row.expires_at ? row.expires_at.split('T')[0] : '2030-12-31',
     active: Boolean(row.is_active),
     usageCount: Number(row.times_used || 0),
+    applicableBookId: row.applicable_book_id || undefined,
   };
 }
 
@@ -180,6 +181,18 @@ interface BookContextType {
   reviews: Review[];
   blogs: BlogPost[];
   videos: VideoItem[];
+  // FIXED (admin panel "UI-only, not real" bug report): every add/update/
+  // delete below optimistically updates local React state immediately
+  // (so the admin panel always LOOKS like it worked), then separately
+  // fires off the actual Supabase write. If that write failed — wrong
+  // foreign key, a UNIQUE constraint collision, a missing required
+  // column, RLS denial, network error, anything — the failure used to go
+  // only to console.warn, which no admin ever checks. The admin would see
+  // their new book/coupon/article appear fine in their own browser, walk
+  // away thinking it's live, and it would simply vanish on next reload
+  // (or never have existed for any other visitor at all) with zero
+  // explanation. lastSyncError carries the most recent such failure so
+  // the UI can surface it as a visible toast instead of staying silent.
   gallery: GalleryItem[];
   events: EventItem[];
   faqs: FaqItem[];
@@ -255,6 +268,10 @@ interface BookContextType {
 
   // Reset demo state
   resetToInitialData: () => void;
+
+  // Visible surface for the silent-Supabase-failure fix described above.
+  lastSyncError: string | null;
+  clearSyncError: () => void;
 }
 
 const INITIAL_SAMPLE_REVIEWS: Review[] = [
@@ -361,6 +378,15 @@ const BookContext = createContext<BookContextType | undefined>(undefined);
 
 export const BookProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const [books, setBooks] = useState<Book[]>(() => getLocalData('books', INITIAL_BOOKS));
+  const [lastSyncError, setLastSyncError] = useState<string | null>(null);
+  const clearSyncError = () => setLastSyncError(null);
+  // Every "if (error) console.warn(...)" callback below also calls this,
+  // so a failed save becomes a visible toast (see AdminPage.tsx) instead
+  // of a silent no-op — see the interface comment above for why.
+  const reportSyncError = (what: string, error: { message: string }) => {
+    console.warn(`Supabase ${what} error:`, error.message);
+    setLastSyncError(`Save failed (${what}): ${error.message}. This did NOT save to the live database — please retry.`);
+  };
   const [categories, setCategories] = useState<Category[]>(() => getLocalData('categories', INITIAL_CATEGORIES));
   const [authors, setAuthors] = useState<Author[]>(() => getLocalData('authors', INITIAL_AUTHORS));
   const [reviews, setReviews] = useState<Review[]>(() => getLocalData('reviews', INITIAL_SAMPLE_REVIEWS));
@@ -456,7 +482,7 @@ export const BookProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const addAuditLog = (action: string, entity: string, details: string) => {
     const newLog: AuditLog = {
       id: 'log-' + Date.now() + '-' + Math.random().toString(36).substring(2, 9),
-      userEmail: 'admin@dharmabooks.org',
+      userEmail: 'admin@shaktiseshanti.com',
       action,
       entity,
       details,
@@ -470,7 +496,7 @@ export const BookProvider: React.FC<{ children: React.ReactNode }> = ({ children
         resource: entity,
         details: { note: details }
       }).then(({ error }) => {
-        if (error) console.warn('Supabase audit log insert error:', error.message);
+        if (error) reportSyncError('audit log insert', error);
       });
     }
   };
@@ -504,7 +530,7 @@ export const BookProvider: React.FC<{ children: React.ReactNode }> = ({ children
         is_bestseller: newBook.isBestSeller || false,
         rating: newBook.rating || 5.0,
       }).then(({ error }) => {
-        if (error) console.warn('Supabase book insert error:', error.message);
+        if (error) reportSyncError('book insert', error);
       });
     }
   };
@@ -528,7 +554,7 @@ export const BookProvider: React.FC<{ children: React.ReactNode }> = ({ children
       updatePayload.updated_at = new Date().toISOString();
 
       supabase.from('books').update(updatePayload).eq('id', id).then(({ error }) => {
-        if (error) console.warn('Supabase book update error:', error.message);
+        if (error) reportSyncError('book update', error);
       });
     }
   };
@@ -540,7 +566,7 @@ export const BookProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
     if (isSupabaseConfigured && supabase) {
       supabase.from('books').delete().eq('id', id).then(({ error }) => {
-        if (error) console.warn('Supabase book delete error:', error.message);
+        if (error) reportSyncError('book delete', error);
       });
     }
   };
@@ -565,7 +591,7 @@ export const BookProvider: React.FC<{ children: React.ReactNode }> = ({ children
         icon_name: newCat.iconName,
         image_url: newCat.image,
       }).then(({ error }) => {
-        if (error) console.warn('Supabase category insert error:', error.message);
+        if (error) reportSyncError('category insert', error);
       });
     }
   };
@@ -581,7 +607,7 @@ export const BookProvider: React.FC<{ children: React.ReactNode }> = ({ children
       if (updated.image !== undefined) payload.image_url = updated.image;
 
       supabase.from('categories').update(payload).eq('id', id).then(({ error }) => {
-        if (error) console.warn('Supabase category update error:', error.message);
+        if (error) reportSyncError('category update', error);
       });
     }
   };
@@ -592,7 +618,7 @@ export const BookProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
     if (isSupabaseConfigured && supabase) {
       supabase.from('categories').delete().eq('id', id).then(({ error }) => {
-        if (error) console.warn('Supabase category delete error:', error.message);
+        if (error) reportSyncError('category delete', error);
       });
     }
   };
@@ -615,7 +641,7 @@ export const BookProvider: React.FC<{ children: React.ReactNode }> = ({ children
         bio: newAuthor.bio,
         photo_url: newAuthor.avatar,
       }).then(({ error }) => {
-        if (error) console.warn('Supabase author insert error:', error.message);
+        if (error) reportSyncError('author insert', error);
       });
     }
   };
@@ -629,7 +655,7 @@ export const BookProvider: React.FC<{ children: React.ReactNode }> = ({ children
       if (updated.avatar !== undefined) payload.photo_url = updated.avatar;
 
       supabase.from('authors').update(payload).eq('id', id).then(({ error }) => {
-        if (error) console.warn('Supabase author update error:', error.message);
+        if (error) reportSyncError('author update', error);
       });
     }
   };
@@ -640,7 +666,7 @@ export const BookProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
     if (isSupabaseConfigured && supabase) {
       supabase.from('authors').delete().eq('id', id).then(({ error }) => {
-        if (error) console.warn('Supabase author delete error:', error.message);
+        if (error) reportSyncError('author delete', error);
       });
     }
   };
@@ -683,7 +709,7 @@ export const BookProvider: React.FC<{ children: React.ReactNode }> = ({ children
         is_approved: false,
       }).select('id').single().then(({ data, error }) => {
         if (error) {
-          console.warn('Supabase review insert error:', error.message);
+          reportSyncError('review insert', error);
           return;
         }
         // reviews.id is a server-generated UUID (uuid_generate_v4()), not the
@@ -704,7 +730,7 @@ export const BookProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
     if (isSupabaseConfigured && supabase) {
       supabase.from('reviews').update({ is_approved: nextApproved }).eq('id', id).then(({ error }) => {
-        if (error) console.warn('Supabase review approval update error:', error.message);
+        if (error) reportSyncError('review approval update', error);
       });
     }
   };
@@ -715,7 +741,7 @@ export const BookProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
     if (isSupabaseConfigured && supabase) {
       supabase.from('reviews').delete().eq('id', id).then(({ error }) => {
-        if (error) console.warn('Supabase review delete error:', error.message);
+        if (error) reportSyncError('review delete', error);
       });
     }
   };
@@ -747,7 +773,7 @@ export const BookProvider: React.FC<{ children: React.ReactNode }> = ({ children
         read_time_minutes: newBlog.readTimeMinutes,
         tags: newBlog.tags,
       }).then(({ error }) => {
-        if (error) console.warn('Supabase blog insert error:', error.message);
+        if (error) reportSyncError('blog insert', error);
       });
     }
   };
@@ -769,7 +795,7 @@ export const BookProvider: React.FC<{ children: React.ReactNode }> = ({ children
       if (updated.tags !== undefined) payload.tags = updated.tags;
 
       supabase.from('blogs').update(payload).eq('id', id).then(({ error }) => {
-        if (error) console.warn('Supabase blog update error:', error.message);
+        if (error) reportSyncError('blog update', error);
       });
     }
   };
@@ -780,7 +806,7 @@ export const BookProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
     if (isSupabaseConfigured && supabase) {
       supabase.from('blogs').delete().eq('id', id).then(({ error }) => {
-        if (error) console.warn('Supabase blog delete error:', error.message);
+        if (error) reportSyncError('blog delete', error);
       });
     }
   };
@@ -868,8 +894,9 @@ export const BookProvider: React.FC<{ children: React.ReactNode }> = ({ children
         min_order_amount: newCoup.minOrderValue,
         is_active: newCoup.active,
         expires_at: newCoup.expiryDate ? `${newCoup.expiryDate}T23:59:59Z` : null,
+        applicable_book_id: newCoup.applicableBookId || null,
       }).then(({ error }) => {
-        if (error) console.warn('Supabase coupon insert error:', error.message);
+        if (error) reportSyncError('coupon insert', error);
       });
     }
   };
@@ -881,7 +908,7 @@ export const BookProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
     if (isSupabaseConfigured && supabase) {
       supabase.from('coupons').update({ is_active: nextActive }).eq('id', id).then(({ error }) => {
-        if (error) console.warn('Supabase coupon toggle error:', error.message);
+        if (error) reportSyncError('coupon toggle', error);
       });
     }
   };
@@ -892,7 +919,7 @@ export const BookProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
     if (isSupabaseConfigured && supabase) {
       supabase.from('coupons').delete().eq('id', id).then(({ error }) => {
-        if (error) console.warn('Supabase coupon delete error:', error.message);
+        if (error) reportSyncError('coupon delete', error);
       });
     }
   };
@@ -1013,7 +1040,7 @@ export const BookProvider: React.FC<{ children: React.ReactNode }> = ({ children
         order_status: status,
         updated_at: new Date().toISOString()
       }).eq('id', id).then(({ error }) => {
-        if (error) console.warn('Supabase order status update error:', error.message);
+        if (error) reportSyncError('order status update', error);
       });
     }
   };
@@ -1031,7 +1058,7 @@ export const BookProvider: React.FC<{ children: React.ReactNode }> = ({ children
       if (details.paymentStatus) payload.payment_status = details.paymentStatus;
 
       supabase.from('orders').update(payload).eq('id', id).then(({ error }) => {
-        if (error) console.warn('Supabase order update error:', error.message);
+        if (error) reportSyncError('order update', error);
       });
     }
   };
@@ -1043,7 +1070,7 @@ export const BookProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
     if (isSupabaseConfigured && supabase) {
       supabase.from('orders').delete().eq('id', id).then(({ error }) => {
-        if (error) console.warn('Supabase order delete error:', error.message);
+        if (error) reportSyncError('order delete', error);
       });
     }
   };
@@ -1053,7 +1080,7 @@ export const BookProvider: React.FC<{ children: React.ReactNode }> = ({ children
     setLocalData('audit_logs', []);
     if (isSupabaseConfigured && supabase) {
       supabase.from('audit_logs').delete().neq('id', '00000000-0000-0000-0000-000000000000').then(({ error }) => {
-        if (error) console.warn('Supabase audit log clear error:', error.message);
+        if (error) reportSyncError('audit log clear', error);
       });
     }
   };
@@ -1067,7 +1094,7 @@ export const BookProvider: React.FC<{ children: React.ReactNode }> = ({ children
           settings: merged,
           updated_at: new Date().toISOString()
         }).then(({ error }) => {
-          if (error) console.warn('Supabase site_settings upsert error:', error.message);
+          if (error) reportSyncError('site_settings upsert', error);
         });
       }
       return merged;
@@ -1141,6 +1168,8 @@ export const BookProvider: React.FC<{ children: React.ReactNode }> = ({ children
         addAuditLog,
         clearAuditLogs,
         resetToInitialData,
+        lastSyncError,
+        clearSyncError,
       }}
     >
       {children}

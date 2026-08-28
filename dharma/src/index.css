@@ -44,6 +44,12 @@ img, video, canvas, svg, iframe {
   height: auto;
 }
 
+/* Used by the OmMandalaLoader page-transition loader's rotating tagline */
+@keyframes fadeIn {
+  from { opacity: 0; transform: translateY(4px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
 @layer utilities {
   .glass-panel {
     background: #FFF8EE;

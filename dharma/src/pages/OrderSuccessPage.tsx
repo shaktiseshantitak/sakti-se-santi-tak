@@ -70,7 +70,7 @@ export const OrderSuccessPage: React.FC<OrderSuccessPageProps> = ({ orderId, onN
           <div className="flex justify-between items-start border-b border-[#D4AF37]/30 pb-6">
             <div>
               <div className="flex items-center gap-2">
-                <span className="font-serif font-bold text-2xl text-[#8B1E3F]">ॐ Dharma Books Pro</span>
+                <span className="font-serif font-bold text-2xl text-[#8B1E3F]">ॐ शक्ति से शांति तक</span>
               </div>
               <p className="text-xs text-[#6E4E37] mt-1 font-medium">Assi Ghat, Varanasi, Uttar Pradesh - 221005</p>
               <p className="text-[11px] text-[#6E4E37]/80 font-mono">GSTIN: 09AAAAA0000A1Z5</p>

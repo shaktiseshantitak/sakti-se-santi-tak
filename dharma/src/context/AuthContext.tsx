@@ -2,14 +2,39 @@ import React, { createContext, useContext, useState, useEffect } from 'react';
 import { UserProfile, OrderAddress } from '../types';
 import { supabase, isSupabaseConfigured } from '../lib/supabase';
 
+// Auto-logout / idle-timeout settings — see the useEffect further below
+// for the full explanation of why this exists.
+const IDLE_TIMEOUT_MS = 15 * 60 * 1000; // 15 minutes
+const LAST_ACTIVITY_KEY = 'dharma_last_activity_at';
+
 interface AuthContextType {
   user: UserProfile | null;
   sessionToken: string | null;
   isAuthenticated: boolean;
+  // NOTE: previously there was no way for a page (e.g. the Customer
+  // Dashboard / Affiliate Portal) to tell the difference between "we
+  // haven't checked Supabase for a session yet" and "we checked, and
+  // there is definitely no logged-in user" — both looked like `user ===
+  // null`. That's exactly why /dashboard and /affiliate were rendering
+  // (with the AffiliatePortal's still-empty placeholder state) for
+  // logged-out visitors: there was no signal to gate on. isAuthLoading
+  // starts true and flips to false once the initial getSession() call
+  // resolves, so pages can show a loader instead of guessing.
+  isAuthLoading: boolean;
   isAdmin: boolean;
   mfaRequired: boolean;
   mfaEmail: string | null;
   authError: string | null;
+  // FIXED (auto-logout / idle timeout): there was previously no session
+  // expiry at all — once logged in (customer or admin), the session
+  // stayed alive indefinitely with no inactivity check, which is a real
+  // security gap especially for the admin panel on a shared/public
+  // computer. sessionTimedOut flips to true the moment the idle-timeout
+  // logout fires, so the UI can show a clear "you were logged out due to
+  // inactivity" message instead of the person just silently landing back
+  // on a login screen with no explanation.
+  sessionTimedOut: boolean;
+  clearSessionTimedOut: () => void;
   login: (email: string, password: string) => Promise<{ success: boolean; error?: string }>;
   register: (fullName: string, email: string, password: string, phone: string) => Promise<{ success: boolean; error?: string; requiresEmailConfirmation?: boolean }>;
   loginAdminStep1: (email: string, password: string) => Promise<{ success: boolean; requiresMfa?: boolean; error?: string }>;
@@ -29,26 +54,30 @@ const AuthContext = createContext<AuthContextType | undefined>(undefined);
 export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const [user, setUser] = useState<UserProfile | null>(null);
   const [sessionToken, setSessionToken] = useState<string | null>(null);
+  const [isAuthLoading, setIsAuthLoading] = useState<boolean>(true);
   const [isAdmin, setIsAdmin] = useState<boolean>(false);
   const [mfaRequired, setMfaRequired] = useState<boolean>(false);
   const [mfaEmail, setMfaEmail] = useState<string | null>(null);
   const [authError, setAuthError] = useState<string | null>(null);
+  const [sessionTimedOut, setSessionTimedOut] = useState<boolean>(false);
 
   // Sync state with Supabase Auth session
   useEffect(() => {
     if (!isSupabaseConfigured || !supabase) {
       setAuthError('Authentication service is not configured.');
+      setIsAuthLoading(false);
       return;
     }
 
     supabase.auth.getSession().then(({ data: { session } }) => {
       if (session?.user) {
         setSessionToken(session.access_token);
-        fetchUserProfileAndRole(session.user.id, session.user.email || '');
+        fetchUserProfileAndRole(session.user.id, session.user.email || '').finally(() => setIsAuthLoading(false));
       } else {
         setUser(null);
         setSessionToken(null);
         setIsAdmin(false);
+        setIsAuthLoading(false);
       }
     });
 
@@ -173,8 +202,32 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     }
 
     const cleanEmail = email.trim().toLowerCase();
+    const cleanPhone = (phone || '').trim();
     if (!cleanEmail || !password || password.length < 6) {
       return { success: false, error: 'Password must be at least 6 characters long.' };
+    }
+
+    // FIXED (duplicate registration — same email): profiles.email already
+    // mirrors auth.users, so a pre-check here catches an already-registered
+    // email up front with a clear message, instead of letting the request
+    // reach Supabase and produce the ambiguous "success" response handled
+    // below. This alone doesn't prevent someone bypassing the client, which
+    // is why the identities-length check further down is the real backstop.
+    const { data: emailTaken } = await supabase.rpc('is_email_registered', { p_email: cleanEmail });
+    if (emailTaken) {
+      return { success: false, error: 'This email is already registered. Please log in instead.' };
+    }
+
+    // FIXED (duplicate registration — same phone): profiles.phone had no
+    // uniqueness constraint at all, so the same real mobile number could be
+    // attached to any number of separate accounts. Checked here via a
+    // SECURITY DEFINER RPC (migration 011) that only returns a boolean, so
+    // no other profile data is exposed to a logged-out visitor.
+    if (cleanPhone) {
+      const { data: phoneTaken } = await supabase.rpc('is_phone_registered', { p_phone: cleanPhone });
+      if (phoneTaken) {
+        return { success: false, error: 'This mobile number is already registered with another account.' };
+      }
     }
 
     const { data, error } = await supabase.auth.signUp({
@@ -183,7 +236,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       options: {
         data: {
           fullName,
-          phone,
+          phone: cleanPhone,
         },
         // FIXED: without this, Supabase falls back to whatever "Site URL" is
         // configured in Dashboard → Authentication → URL Configuration for
@@ -198,6 +251,20 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
     if (error) {
       return { success: false, error: error.message };
+    }
+
+    // FIXED (duplicate registration — same email, race-condition backstop):
+    // when signUp() is called with an email that already has an account,
+    // Supabase deliberately does NOT return an error (to avoid leaking which
+    // emails exist) — it returns `{ user, session: null }` with `identities`
+    // as an EMPTY array. The old code had no idea this case existed and
+    // treated it exactly like a brand-new signup awaiting email
+    // confirmation, so re-submitting an existing email showed "Account
+    // created! Please check your email" — indistinguishable from an
+    // actual new account being created. Checking identities.length here
+    // catches this even if the pre-check above raced with another signup.
+    if (data.user && Array.isArray(data.user.identities) && data.user.identities.length === 0) {
+      return { success: false, error: 'This email is already registered. Please log in instead.' };
     }
 
     if (data.session) {
@@ -411,7 +478,58 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     setMfaRequired(false);
     setMfaEmail(null);
     sessionStorage.removeItem('dharma_admin_otp_verified');
+    localStorage.removeItem(LAST_ACTIVITY_KEY);
   };
+
+  const clearSessionTimedOut = () => setSessionTimedOut(false);
+
+  // FIXED (auto-logout / idle timeout — real security gap): neither
+  // customer accounts nor the admin panel ever expired on their own.
+  // Someone logged into the admin panel on a shared/public computer (or a
+  // customer on a library/cyber-cafe PC) who forgot to log out stayed
+  // signed in indefinitely — the Supabase session token just kept
+  // silently refreshing itself forever. This logs everyone out (customer
+  // and admin alike — admin is just a `user` with an elevated role, so
+  // one mechanism covers both) after 15 minutes with no mouse/keyboard/
+  // touch/scroll activity.
+  //
+  // Last-activity time is kept in localStorage (not just a React ref) for
+  // two reasons: it survives a page refresh (so reloading the tab right
+  // before the timeout doesn't reset the clock to "fully active" for no
+  // reason), and it's shared across every open tab of the same site, so
+  // typing in one tab correctly keeps you logged in on all of them rather
+  // than each tab independently timing out.
+  useEffect(() => {
+    if (!user) return;
+
+    const markActivity = () => {
+      localStorage.setItem(LAST_ACTIVITY_KEY, String(Date.now()));
+    };
+    markActivity();
+
+    const activityEvents: Array<keyof WindowEventMap> = [
+      'mousedown', 'mousemove', 'keydown', 'scroll', 'touchstart', 'click', 'wheel',
+    ];
+    activityEvents.forEach(evt => window.addEventListener(evt, markActivity, { passive: true }));
+
+    // Checked periodically rather than with a single long-lived
+    // setTimeout, since a laptop going to sleep would otherwise let a
+    // single setTimeout fire late (or not at all) instead of correctly
+    // detecting "more than 15 idle minutes have actually passed".
+    const intervalId = window.setInterval(() => {
+      const last = Number(localStorage.getItem(LAST_ACTIVITY_KEY) || Date.now());
+      if (Date.now() - last >= IDLE_TIMEOUT_MS) {
+        logout();
+        setSessionTimedOut(true);
+      }
+    }, 15000);
+
+    return () => {
+      activityEvents.forEach(evt => window.removeEventListener(evt, markActivity));
+      window.clearInterval(intervalId);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [user?.id]);
 
   const updateProfile = async (updated: Partial<UserProfile>) => {
     if (!user || !supabase) return;
@@ -471,10 +589,13 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         user,
         sessionToken,
         isAuthenticated: Boolean(user),
+        isAuthLoading,
         isAdmin,
         mfaRequired,
         mfaEmail,
         authError,
+        sessionTimedOut,
+        clearSessionTimedOut,
         login,
         register,
         loginAdminStep1,

@@ -14,7 +14,7 @@ export const InstagramGallery: React.FC<InstagramGalleryProps> = ({ gallery, onV
         <div className="text-center max-w-2xl mx-auto mb-10">
           <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-rose-50 dark:bg-rose-950/40 text-rose-600 dark:text-rose-400 text-xs font-semibold mb-2">
             <Instagram className="w-3.5 h-3.5" />
-            <span>@dharmabookspro</span>
+            <span>@shaktiseshanti</span>
           </div>
           <h2 className="font-serif text-2xl sm:text-4xl font-bold text-zinc-900 dark:text-white">
             Sacred Printing Press & Seva Gallery

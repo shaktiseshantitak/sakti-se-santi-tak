@@ -18,7 +18,7 @@ export const QrShareModal: React.FC<QrShareModalProps> = ({ book, onClose }) => 
   };
 
   const whatsappMessage = encodeURIComponent(
-    `🙏🏻 Namaste! Check out this sacred book on Dharma Books Pro: "${book.title}" by ${book.authorName}. Price: ₹${book.offerPrice} (MRP ₹${book.mrp}). Order now: ${shareUrl}`
+    `🙏🏻 Namaste! Check out this sacred book on Shakti Se Shanti Tak (shaktiseshanti.com): "${book.title}" by ${book.authorName}. Price: ₹${book.offerPrice} (MRP ₹${book.mrp}). Order now: ${shareUrl}`
   );
 
   return (

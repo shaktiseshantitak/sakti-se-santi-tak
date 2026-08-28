@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { User, Package, BookOpen, MapPin, Key, LogOut, Download, FileText, CheckCircle2, Award, Share2, Plus, Trash2 } from 'lucide-react';
+import { User, Package, BookOpen, MapPin, Key, LogOut, Download, FileText, CheckCircle2, Award, Share2, Plus, Trash2, LogIn, ShieldAlert } from 'lucide-react';
 import { Breadcrumbs } from '../components/common/Breadcrumbs';
 import { useAuth } from '../context/AuthContext';
 import { useBooks } from '../context/BookContext';
@@ -18,7 +18,7 @@ const BLANK_ADDRESS: OrderAddress = {
 };
 
 export const CustomerDashboardPage: React.FC<CustomerDashboardPageProps> = ({ onNavigate, initialTab = 'affiliate' }) => {
-  const { user, logout, updateProfile, updatePassword, addAddress, removeAddress } = useAuth();
+  const { user, isAuthLoading, logout, updateProfile, updatePassword, addAddress, removeAddress } = useAuth();
   const { orders, books } = useBooks();
 
   const [activeTab, setActiveTab] = useState<'orders' | 'library' | 'profile' | 'addresses' | 'affiliate'>(initialTab);
@@ -101,6 +101,45 @@ export const CustomerDashboardPage: React.FC<CustomerDashboardPageProps> = ({ on
     await removeAddress(index);
   };
 
+  // NOTE: this page (and the Affiliate Portal it hosts under the
+  // "affiliate" tab) previously rendered unconditionally for every
+  // visitor, logged in or not — there was no auth guard at all here or
+  // in App.tsx's routing. A logged-out visitor hitting /dashboard or
+  // /affiliate directly would see the whole dashboard shell with
+  // placeholder/zeroed-out data, which looked exactly like "dummy data
+  // showing without login". isAuthLoading (see AuthContext) lets us
+  // wait for the initial session check instead of guessing, so a
+  // real logged-in user doesn't flash this screen on refresh.
+  if (isAuthLoading) {
+    return (
+      <div className="py-24 flex items-center justify-center bg-[#F8F4E8] min-h-screen">
+        <div className="w-8 h-8 border-4 border-[#D4AF37] border-t-transparent rounded-full animate-spin" />
+      </div>
+    );
+  }
+
+  if (!user) {
+    return (
+      <div className="py-24 bg-[#F8F4E8] text-[#4A2C17] min-h-screen flex items-center justify-center px-4">
+        <div className="bg-[#FFF8EE] p-10 rounded-3xl border border-[#D4AF37]/40 text-center max-w-md shadow-sm">
+          <ShieldAlert className="w-14 h-14 text-[#D4AF37] mx-auto mb-4" />
+          <h1 className="font-serif text-xl font-bold text-[#8B1E3F] mb-2">
+            Please Log In
+          </h1>
+          <p className="text-xs text-[#6E4E37] font-medium mb-6">
+            You need to sign in to view your dashboard, orders, and the Affiliate & Referral Portal.
+          </p>
+          <button
+            onClick={() => onNavigate('login')}
+            className="inline-flex items-center gap-2 bg-[#D4AF37] hover:bg-amber-400 text-[#3A1F0D] font-bold text-xs px-6 py-3 rounded-xl shadow border border-amber-200 transition-colors"
+          >
+            <LogIn className="w-4 h-4" /> Go to Login
+          </button>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="py-8 bg-[#F8F4E8] text-[#4A2C17] min-h-screen">
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
@@ -116,7 +155,7 @@ export const CustomerDashboardPage: React.FC<CustomerDashboardPageProps> = ({ on
                 Namaste, {user?.fullName || 'Seeker of Wisdom'}
               </h1>
               <p className="text-xs text-[#6E4E37] font-medium">
-                {user?.email || 'seeker@dharmabooks.pro'} • Member since 2024
+                {user?.email || 'seeker@shaktiseshanti.com'} • Member since 2024
               </p>
             </div>
           </div>
