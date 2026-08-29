@@ -42,20 +42,25 @@ export const HomePage: React.FC<HomePageProps> = ({
     onNavigate('checkout', { directBook: targetBook });
   };
 
-  return (
-    <div className="bg-[#F8F4E8] text-[#4A2C17] pb-16 space-y-12">
-      
-      {/* 1. Main Hero Banner */}
+  // FEATURE (2026-08-29 — admin-controlled section visibility/order): each
+  // of the 5 sections below is now keyed so siteSettings.homepageSections
+  // (edited in Admin -> Settings -> Homepage) can toggle it on/off and
+  // reorder it, without changing what each section actually renders.
+  const DEFAULT_SECTION_ORDER = ['hero', 'trust', 'featured', 'testimonials', 'buy_cta'];
+  const sectionOrder = siteSettings?.homepageSections && siteSettings.homepageSections.length > 0
+    ? [...siteSettings.homepageSections].sort((a, b) => a.order - b.order)
+    : DEFAULT_SECTION_ORDER.map((id, i) => ({ id, enabled: true, order: i } as any));
+
+  const sectionRenderers: Record<string, React.ReactNode> = {
+    hero: (
       <ShaktiHeroBanner
         shaktiBook={shaktiBook}
         onBuyNow={handleBuyNow}
         onAuthorsClick={() => onNavigate('authors')}
       />
-
-      {/* 2. Trust & Features Section */}
-      <TrustSection />
-
-      {/* 3. Single Featured Book Concise Spotlight */}
+    ),
+    trust: <TrustSection />,
+    featured: (
       <section className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
         <div className="bg-gradient-to-br from-[#8B1E3F] to-[#5C142B] text-amber-100 rounded-3xl p-6 sm:p-10 shadow-xl border border-amber-400/30 flex flex-col lg:flex-row items-center gap-8 justify-between">
           <div className="space-y-4 max-w-2xl text-center lg:text-left">
@@ -97,19 +102,28 @@ export const HomePage: React.FC<HomePageProps> = ({
           </div>
         </div>
       </section>
-
-      {/* 4. Social Proof & Testimonials / Sacred Stats */}
-      {testimonials && testimonials.length > 0 && (
-        <TestimonialsSection testimonials={testimonials} />
-      )}
-      <SacredStats />
-
-      {/* 5. Buy Section (Large Order CTA) */}
+    ),
+    testimonials: (
+      <>
+        {testimonials && testimonials.length > 0 && (
+          <TestimonialsSection testimonials={testimonials} />
+        )}
+        <SacredStats />
+      </>
+    ),
+    buy_cta: (
       <BuyCtaSection
         shaktiBook={shaktiBook}
         onBuyNow={handleBuyNow}
       />
+    ),
+  };
 
+  return (
+    <div className="bg-[#F8F4E8] text-[#4A2C17] pb-16 space-y-12">
+      {sectionOrder
+        .filter((sec: any) => sec.enabled)
+        .map((sec: any) => <React.Fragment key={sec.id}>{sectionRenderers[sec.id]}</React.Fragment>)}
     </div>
   );
 };

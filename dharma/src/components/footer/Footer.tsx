@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { Mail, Phone, MapPin, Send, CheckCircle2, Shield, Heart, Award, ArrowUpRight } from 'lucide-react';
+import { Mail, Phone, MapPin, Send, CheckCircle2, Shield, Heart, Award, ArrowUpRight, Facebook, Instagram, Youtube, Twitter } from 'lucide-react';
 import { useBooks } from '../../context/BookContext';
 
 interface FooterProps {
@@ -267,6 +267,38 @@ export const Footer: React.FC<FooterProps> = ({ onNavigate }) => {
           </div>
         </div>
 
+        {/* FIXED (2026-08-29 — "footerColumns kya hai, banao"): admin-
+            created custom footer columns, rendered as an additional row
+            below the 4 built-in columns above (kept as-is — they're tied
+            to real navigation/category logic that shouldn't be touched).
+            Only appears at all if the admin has actually added a column. */}
+        {siteSettings.footerColumns && siteSettings.footerColumns.length > 0 && (
+          <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-6 pb-12 border-b border-[#D4AF37]/30 mt-6">
+            {siteSettings.footerColumns.map(col => (
+              <div key={col.id}>
+                <h4 className="text-sm font-semibold text-white uppercase tracking-wider mb-4 font-serif">
+                  {col.title}
+                </h4>
+                <ul className="space-y-2.5 text-xs text-amber-100/80">
+                  {col.links.map(link => (
+                    <li key={link.id}>
+                      {link.url ? (
+                        <a href={link.url} target="_blank" rel="noopener noreferrer" className="hover:text-[#F4E285] transition-colors">
+                          {link.label}
+                        </a>
+                      ) : (
+                        <button onClick={() => onNavigate(link.page)} className="hover:text-[#F4E285] transition-colors">
+                          {link.label}
+                        </button>
+                      )}
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            ))}
+          </div>
+        )}
+
         {/* Payment & Logistics Badges */}
         <div className="pt-8 border-t border-[#D4AF37]/30 flex flex-col md:flex-row items-center justify-between gap-4 text-xs text-amber-200">
           <div className="flex flex-wrap items-center gap-2">
@@ -301,6 +333,36 @@ export const Footer: React.FC<FooterProps> = ({ onNavigate }) => {
             </span>
           </div>
         </div>
+
+        {/* FIXED (2026-08-29 — "Control Panel is dummy"): siteSettings.
+            socialLinks was captured and saved by the admin form but no
+            component anywhere on the site ever rendered them — the
+            Footer had no social icons at all. Each icon only shows up if
+            the admin actually filled in that platform's URL. */}
+        {(siteSettings.socialLinks?.facebook || siteSettings.socialLinks?.instagram || siteSettings.socialLinks?.youtube || siteSettings.socialLinks?.twitter) && (
+          <div className="flex justify-center gap-4 mt-6">
+            {siteSettings.socialLinks?.facebook && (
+              <a href={siteSettings.socialLinks.facebook} target="_blank" rel="noopener noreferrer" className="p-2 rounded-full bg-[#66122C] hover:bg-[#500D20] text-amber-100 transition-colors" title="Facebook">
+                <Facebook className="w-4 h-4" />
+              </a>
+            )}
+            {siteSettings.socialLinks?.instagram && (
+              <a href={siteSettings.socialLinks.instagram} target="_blank" rel="noopener noreferrer" className="p-2 rounded-full bg-[#66122C] hover:bg-[#500D20] text-amber-100 transition-colors" title="Instagram">
+                <Instagram className="w-4 h-4" />
+              </a>
+            )}
+            {siteSettings.socialLinks?.youtube && (
+              <a href={siteSettings.socialLinks.youtube} target="_blank" rel="noopener noreferrer" className="p-2 rounded-full bg-[#66122C] hover:bg-[#500D20] text-amber-100 transition-colors" title="YouTube">
+                <Youtube className="w-4 h-4" />
+              </a>
+            )}
+            {siteSettings.socialLinks?.twitter && (
+              <a href={siteSettings.socialLinks.twitter} target="_blank" rel="noopener noreferrer" className="p-2 rounded-full bg-[#66122C] hover:bg-[#500D20] text-amber-100 transition-colors" title="Twitter / X">
+                <Twitter className="w-4 h-4" />
+              </a>
+            )}
+          </div>
+        )}
 
         {/* Bottom Copyright */}
         <div className="mt-8 pt-6 border-t border-[#66122C] text-center text-xs text-amber-200/70 flex flex-col sm:flex-row items-center justify-between gap-2">

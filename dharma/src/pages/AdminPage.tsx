@@ -11,8 +11,8 @@ import { Breadcrumbs } from '../components/common/Breadcrumbs';
 import { useBooks } from '../context/BookContext';
 import { useAuth } from '../context/AuthContext';
 import { useLiveStream } from '../context/LiveStreamContext';
-import { Radio, Video } from 'lucide-react';
-import { Book, Order, OrderStatus, Coupon, Category, Author, BlogPost, BookVariant, BookFormat, BookLanguage } from '../types';
+import { Radio, Video, Mail } from 'lucide-react';
+import { Book, Order, OrderStatus, Coupon, Category, Author, BlogPost, BookVariant, BookFormat, BookLanguage, FooterColumn, HomepageSection } from '../types';
 import {
   validateGoogleDriveLink,
   convertGoogleDriveImageUrl,
@@ -27,6 +27,7 @@ import {
 } from '../lib/mediaProcessor';
 import { submitCustomerReviewApi } from '../lib/reviewsApi';
 import { AdminAffiliateManagement } from '../components/affiliate/AdminAffiliateManagement';
+import { AdminCustomerManagement } from '../components/admin/AdminCustomerManagement';
 import { uploadMediaToStorage, uploadImageToStorage } from '../lib/storage';
 
 interface AdminPageProps {
@@ -46,7 +47,8 @@ export const AdminPage: React.FC<AdminPageProps> = ({ onNavigate, onOpenLiveStud
     addReview, toggleReviewApproval, deleteReview,
     updateOrderStatus, updateOrderDetails, deleteOrder,
     updateSiteSettings, clearAuditLogs, resetToInitialData,
-    lastSyncError, clearSyncError
+    lastSyncError, clearSyncError,
+    contactMessages, markContactMessageRead
   } = useBooks();
   const { user, isAdmin, sessionToken } = useAuth();
   const [backupStatus, setBackupStatus] = useState<string | null>(null);
@@ -74,49 +76,31 @@ export const AdminPage: React.FC<AdminPageProps> = ({ onNavigate, onOpenLiveStud
     }
   };
 
-  // NOTE: this used to also gate on `isAdminTotpVerified`, a property that was
-  // never defined anywhere in AuthContext (not in the interface, not in the
-  // provider's returned value) — destructuring it from useAuth() always produced
-  // `undefined`, so `!isAdminTotpVerified` was always true and this screen
-  // permanently blocked every admin from the panel, verified or not.
-  // `isAdmin` already only becomes true post-OTP verification (see
-  // AuthContext.tsx: fetchUserProfileAndRole and verifyAdminMfa), so the
-  // 2-step requirement is already encoded in `isAdmin` itself.
+  // FIXED (security — "/admin ye khud reveal kar deta tha ki admin panel
+  // exist karta hai"): this used to show an "Admin Security Lock" screen
+  // with a big "Authenticate with Email OTP" button that literally
+  // navigated straight to the secret admin-login URL — meaning anyone who
+  // just guessed the common path /admin instantly learned (a) an admin
+  // system exists here, and (b) got a one-click link to the real secret
+  // login page, completely defeating the point of that URL being
+  // unguessable in the first place. A non-admin visitor now gets sent
+  // straight back to the storefront with no admin-related screen ever
+  // rendered — /admin looks and behaves exactly like any other unknown
+  // URL. The real login only works via the secret /admin/login-user/...
+  // path (see App.tsx's PAGE_TO_PATH), which is never linked from
+  // anywhere public.
+  useEffect(() => {
+    if (!isAdmin) {
+      onNavigate('home');
+    }
+  }, [isAdmin]);
+
   if (!isAdmin) {
-    return (
-      <div className="py-16 bg-[#F8F4E8] text-[#4A2C17] min-h-screen flex items-center justify-center px-4">
-        <div className="max-w-md w-full bg-[#FFF8EE] border border-[#D4AF37]/40 rounded-3xl p-8 shadow-sm text-center space-y-4">
-          <div className="w-16 h-16 rounded-2xl bg-[#8B1E3F]/10 text-[#8B1E3F] mx-auto flex items-center justify-center border border-[#8B1E3F]/20">
-            <Lock className="w-8 h-8" />
-          </div>
-          <h2 className="font-serif text-2xl font-bold text-[#8B1E3F]">
-            Admin Security Lock
-          </h2>
-          <p className="text-xs text-[#6E4E37] font-medium">
-            Email OTP 2-Step verification is required to access the Master Executive Control Panel.
-          </p>
-          <div className="pt-2 space-y-2">
-            <button
-              onClick={() => onNavigate('admin-login')}
-              className="w-full bg-[#D4AF37] hover:bg-amber-400 text-[#3A1F0D] font-extrabold text-xs py-3 rounded-xl shadow border border-amber-200 flex items-center justify-center gap-2"
-            >
-              <ShieldCheck className="w-4 h-4" />
-              <span>Authenticate with Email OTP</span>
-            </button>
-            <button
-              onClick={() => onNavigate('home')}
-              className="w-full text-xs text-[#8B1E3F] hover:underline py-2 font-bold"
-            >
-              Return to Storefront
-            </button>
-          </div>
-        </div>
-      </div>
-    );
+    return null;
   }
 
   const [activeTab, setActiveTab] = useState<
-    'dashboard' | 'settings' | 'books' | 'orders' | 'categories' | 'coupons' | 'blogs' | 'reviews' | 'livestream' | 'seo' | 'security' | 'sql-export' | 'affiliates'
+    'dashboard' | 'settings' | 'books' | 'orders' | 'categories' | 'coupons' | 'blogs' | 'reviews' | 'livestream' | 'seo' | 'security' | 'sql-export' | 'affiliates' | 'customers'
   >('dashboard');
 
   // Order Search & Filter & Modal State
@@ -175,6 +159,13 @@ export const AdminPage: React.FC<AdminPageProps> = ({ onNavigate, onOpenLiveStud
   const [formCover, setFormCover] = useState<string>('https://images.unsplash.com/photo-1544716278-ca5e3f4abd8c?auto=format&fit=crop&w=600&q=80');
   const [formSamplePdf, setFormSamplePdf] = useState<string>('https://raw.githubusercontent.com/mozilla/pdf.js/ba2edeae/examples/learning/helloworld.pdf');
   const [formSampleAudio, setFormSampleAudio] = useState<string>('https://www.soundhelix.com/examples/mp3/SoundHelix-Song-1.mp3');
+  // FIXED (2026-08-29 — "Add Book: video upload option, YouTube link AND
+  // direct file upload"): book trailer video, either a pasted YouTube link
+  // or an uploaded video file (goes through the same R2 upload endpoint
+  // media uploads already use elsewhere in this file).
+  const [formTrailerUrl, setFormTrailerUrl] = useState<string>('');
+  const [formTrailerIsYoutube, setFormTrailerIsYoutube] = useState<boolean>(true);
+  const [isUploadingTrailer, setIsUploadingTrailer] = useState<boolean>(false);
   const [formIsBestseller, setFormIsBestseller] = useState<boolean>(true);
 
   // Book-level SEO Form State
@@ -421,6 +412,8 @@ export const AdminPage: React.FC<AdminPageProps> = ({ onNavigate, onOpenLiveStud
   const [settingsAddress, setSettingsAddress] = useState<string>(siteSettings.address || 'वाराणसी प्रकाशन केंद्र, उत्तर प्रदेश, भारत');
   const [settingsFreeShip, setSettingsFreeShip] = useState<number>(siteSettings.freeShippingThreshold || siteSettings.freeShippingMinAmount || 499);
   const [settingsCodEnabled, setSettingsCodEnabled] = useState<boolean>(siteSettings.enableCod ?? true);
+  const [settingsUpiEnabled, setSettingsUpiEnabled] = useState<boolean>(siteSettings.enableUpi ?? true);
+  const [settingsOnlinePaymentEnabled, setSettingsOnlinePaymentEnabled] = useState<boolean>(siteSettings.enableOnlinePayment ?? true);
 
   // Hero & Content Overrides
   const [settingsHeroTitle, setSettingsHeroTitle] = useState<string>(siteSettings.heroBannerOverrideTitle || '');
@@ -485,6 +478,24 @@ export const AdminPage: React.FC<AdminPageProps> = ({ onNavigate, onOpenLiveStud
   const [googleAnalyticsId, setGoogleAnalyticsId] = useState<string>(siteSettings.analytics?.googleAnalyticsId || 'G-SHAKTI9876');
   const [facebookPixelId, setFacebookPixelId] = useState<string>(siteSettings.analytics?.facebookPixelId || '1234567890');
   const [googleMapsKey, setGoogleMapsKey] = useState<string>(siteSettings.analytics?.googleMapsApiKey || '');
+  // FEATURE (2026-08-29 — admin-managed footer columns): extra footer link
+  // columns rendered below the 4 built-in ones (see Footer.tsx).
+  const [footerColumns, setFooterColumns] = useState<FooterColumn[]>(siteSettings.footerColumns || []);
+  // FEATURE (2026-08-29 — homepage section visibility/order): controls
+  // which of HomePage.tsx's sections show and in what order (see
+  // HomePage.tsx's use of siteSettings.homepageSections).
+  const DEFAULT_HOMEPAGE_SECTIONS: HomepageSection[] = [
+    { id: 'hero', name: 'Main Hero Banner', type: 'hero', enabled: true, order: 1 },
+    { id: 'trust', name: 'Trust & Features', type: 'trust', enabled: true, order: 2 },
+    { id: 'featured', name: 'Featured Book Spotlight', type: 'about_book', enabled: true, order: 3 },
+    { id: 'testimonials', name: 'Testimonials & Stats', type: 'testimonials', enabled: true, order: 4 },
+    { id: 'buy_cta', name: 'Final Buy CTA', type: 'buy_cta', enabled: true, order: 5 },
+  ];
+  const [homepageSections, setHomepageSections] = useState<HomepageSection[]>(
+    siteSettings.homepageSections && siteSettings.homepageSections.length > 0
+      ? siteSettings.homepageSections
+      : DEFAULT_HOMEPAGE_SECTIONS
+  );
 
   // Form states for adding new Custom Page / Popup
   const [newPageTitle, setNewPageTitle] = useState<string>('');
@@ -508,7 +519,8 @@ export const AdminPage: React.FC<AdminPageProps> = ({ onNavigate, onOpenLiveStud
       setSettingsAddress(siteSettings.address || 'वाराणसी प्रकाशन केंद्र, उत्तर प्रदेश, भारत');
       setSettingsFreeShip(siteSettings.freeShippingThreshold || siteSettings.freeShippingMinAmount || 499);
       setSettingsCodEnabled(siteSettings.enableCod ?? true);
-
+      setSettingsUpiEnabled(siteSettings.enableUpi ?? true);
+      setSettingsOnlinePaymentEnabled(siteSettings.enableOnlinePayment ?? true);
       setSettingsHeroTitle(siteSettings.heroBannerOverrideTitle || '');
       setSettingsHeroSubtitle(siteSettings.heroBannerOverrideSubtitle || '');
       setSettingsHeroTagline(siteSettings.heroBannerOverrideTagline || '');
@@ -848,7 +860,25 @@ export const AdminPage: React.FC<AdminPageProps> = ({ onNavigate, onOpenLiveStud
     setFormBookSeoKeywords('');
     setFormBookSeoOgImage('');
     setFormBookSeoCanonical('');
+    setFormTrailerUrl('');
+    setFormTrailerIsYoutube(true);
     setShowBookModal(true);
+  };
+
+  const handleTrailerFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    setIsUploadingTrailer(true);
+    await processFileUpload(
+      file,
+      'book-trailers',
+      (url) => {
+        setFormTrailerUrl(url);
+        setFormTrailerIsYoutube(false);
+      },
+      { maxSizeBytes: 100 * 1024 * 1024, allowedMimeTypes: ['video/mp4', 'video/webm', 'video/quicktime'] }
+    );
+    setIsUploadingTrailer(false);
   };
 
   const openEditBookModal = (b: Book) => {
@@ -874,6 +904,8 @@ export const AdminPage: React.FC<AdminPageProps> = ({ onNavigate, onOpenLiveStud
     setFormBookSeoKeywords(b.seo?.metaKeywords || '');
     setFormBookSeoOgImage(b.seo?.ogImage || '');
     setFormBookSeoCanonical(b.seo?.canonicalUrl || '');
+    setFormTrailerUrl(b.trailerVideoUrl || '');
+    setFormTrailerIsYoutube(b.trailerVideoIsYoutube ?? true);
     setShowBookModal(true);
   };
 
@@ -913,6 +945,8 @@ export const AdminPage: React.FC<AdminPageProps> = ({ onNavigate, onOpenLiveStud
         sampleAudioUrl: formSampleAudio,
         isBestSeller: formIsBestseller,
         seo: bookSeoData,
+        trailerVideoUrl: formTrailerUrl || undefined,
+        trailerVideoIsYoutube: formTrailerIsYoutube,
       });
       triggerToast('Book details, multi-images, varieties & SEO updated!');
     } else {
@@ -953,6 +987,8 @@ export const AdminPage: React.FC<AdminPageProps> = ({ onNavigate, onOpenLiveStud
         description: formDesc || 'Pristine Sanskrit text with English translation and commentary.',
         longDescription: formLongDesc || 'Pristine Sanskrit text with word-for-word commentary.',
         seo: bookSeoData,
+        trailerVideoUrl: formTrailerUrl || undefined,
+        trailerVideoIsYoutube: formTrailerIsYoutube,
       });
       triggerToast('New scripture with multi-images & varieties added to catalog!');
     }
@@ -996,6 +1032,8 @@ export const AdminPage: React.FC<AdminPageProps> = ({ onNavigate, onOpenLiveStud
       freeShippingThreshold: settingsFreeShip,
       freeShippingMinAmount: settingsFreeShip,
       enableCod: settingsCodEnabled,
+      enableUpi: settingsUpiEnabled,
+      enableOnlinePayment: settingsOnlinePaymentEnabled,
       heroBannerOverrideTitle: settingsHeroTitle,
       heroBannerOverrideSubtitle: settingsHeroSubtitle,
       heroBannerOverrideTagline: settingsHeroTagline,
@@ -1032,6 +1070,8 @@ export const AdminPage: React.FC<AdminPageProps> = ({ onNavigate, onOpenLiveStud
         facebookPixelId,
         googleMapsApiKey: googleMapsKey,
       },
+      footerColumns,
+      homepageSections,
     });
     triggerToast('कंट्रोल पैनल सेटिंग्स सफलतापूर्वक अपडेट हो गईं! (Control Panel Updated Successfully!)');
   };
@@ -1446,12 +1486,25 @@ CREATE POLICY "Admin All Access" ON public.books FOR ALL USING (auth.role() = 'a
           >
             🤝 Enterprise Affiliate & Referral System
           </button>
+          <button
+            onClick={() => setActiveTab('customers')}
+            className={`pb-3 whitespace-nowrap transition-all ${activeTab === 'customers' ? 'border-b-2 border-amber-600 text-amber-600' : 'text-zinc-500'}`}
+          >
+            👥 Customers
+          </button>
         </div>
 
 
 
         {/* Tab: Affiliate Management */}
         {activeTab === 'affiliates' && <AdminAffiliateManagement />}
+
+        {/* FIXED (2026-08-29 — "Customer details are not displayed
+            anywhere in the admin panel"): a full customer directory built
+            from the same real `orders` array (grouped by customer) already
+            used by everything else in this file, plus a live `profiles`
+            fetch for account status — no dummy/hardcoded data. */}
+        {activeTab === 'customers' && <AdminCustomerManagement orders={orders} />}
 
         {/* Tab 1: Dashboard Overview */}
         {activeTab === 'dashboard' && (
@@ -1476,17 +1529,58 @@ CREATE POLICY "Admin All Access" ON public.books FOR ALL USING (auth.role() = 'a
                 back a widget like this (Netlify Functions don't expose live CPU/RAM, and there's
                 no analytics/presence table), so it's removed rather than kept misleading. */}
 
-            {/* Google Sheets Daily Backup — office/back-office data export,
-                once a day automatically + on-demand here. */}
+            {/* Publishing Desk Inquiries — "Get in Touch with Our Publishing
+                Desk" contact form submissions, previously invisible to
+                admins (table existed via migration 008 but no admin UI
+                ever read it). */}
             <div className="bg-white dark:bg-zinc-900 rounded-3xl p-6 border border-zinc-200 dark:border-zinc-800 shadow-sm space-y-3">
+              <h3 className="font-serif font-bold text-lg text-zinc-900 dark:text-white flex items-center gap-2">
+                <Mail className="w-5 h-5 text-amber-600" /> Publishing Desk Inquiries
+                {contactMessages.filter(m => !m.isRead).length > 0 && (
+                  <span className="bg-rose-600 text-white text-[10px] font-extrabold px-2 py-0.5 rounded-full">
+                    {contactMessages.filter(m => !m.isRead).length} new
+                  </span>
+                )}
+              </h3>
+              {contactMessages.length === 0 ? (
+                <p className="text-xs text-zinc-500">No inquiries yet.</p>
+              ) : (
+                <div className="space-y-2 max-h-96 overflow-y-auto">
+                  {contactMessages.map(m => (
+                    <div
+                      key={m.id}
+                      className={`p-3 rounded-xl border text-xs ${m.isRead ? 'bg-zinc-50 dark:bg-zinc-800/40 border-zinc-200 dark:border-zinc-700' : 'bg-amber-50 dark:bg-amber-950/20 border-amber-300 dark:border-amber-700'}`}
+                    >
+                      <div className="flex justify-between items-start gap-2">
+                        <div>
+                          <p className="font-bold">{m.name} <span className="font-normal text-zinc-500">&lt;{m.email}&gt;</span></p>
+                          {m.subject && <p className="font-semibold text-amber-700 dark:text-amber-400">{m.subject}</p>}
+                        </div>
+                        <span className="text-[10px] text-zinc-400 shrink-0">{new Date(m.createdAt).toLocaleDateString('en-IN')}</span>
+                      </div>
+                      <p className="mt-1 text-zinc-600 dark:text-zinc-300">{m.message}</p>
+                      {!m.isRead && (
+                        <button onClick={() => markContactMessageRead(m.id)} className="mt-2 text-[10px] font-bold text-amber-700 dark:text-amber-400">
+                          Mark as read
+                        </button>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+
+            {/* Google Sheets Daily Backup — office/back-office data export,
+                once a day automatically + on-demand here. */}            <div className="bg-white dark:bg-zinc-900 rounded-3xl p-6 border border-zinc-200 dark:border-zinc-800 shadow-sm space-y-3">
               <h3 className="font-serif font-bold text-lg text-zinc-900 dark:text-white flex items-center gap-2">
                 <FileText className="w-5 h-5 text-emerald-600" /> Google Sheets Backup
               </h3>
               <p className="text-xs text-zinc-500 dark:text-zinc-400">
                 Orders, Books, Coupons, Contact Messages, and Affiliate data export automatically to a
                 Google Sheet every day (one tab per data type), plus on-demand below. Requires
-                GOOGLE_SERVICE_ACCOUNT_EMAIL, GOOGLE_SERVICE_ACCOUNT_PRIVATE_KEY, and
-                GOOGLE_SHEETS_SPREADSHEET_ID to be set in Netlify environment variables.
+                GOOGLE_APPS_SCRIPT_WEBHOOK_URL to be set in Netlify environment variables
+                (a Google Sheet's own Apps Script Web App link — no Cloud Console needed;
+                see the deployment guide for the one-time setup steps).
               </p>
               <button
                 onClick={handleBackupNow}
@@ -1724,7 +1818,7 @@ CREATE POLICY "Admin All Access" ON public.books FOR ALL USING (auth.role() = 'a
                         />
                       </div>
 
-                      <div className="pt-4">
+                      <div className="pt-4 space-y-3">
                         <label className="flex items-center gap-3 cursor-pointer select-none">
                           <input
                             type="checkbox"
@@ -1734,6 +1828,28 @@ CREATE POLICY "Admin All Access" ON public.books FOR ALL USING (auth.role() = 'a
                           />
                           <span className="font-bold text-zinc-900 dark:text-zinc-100 text-sm">
                             कैश ऑन डिलीवरी (COD) चालू रखें
+                          </span>
+                        </label>
+                        <label className="flex items-center gap-3 cursor-pointer select-none">
+                          <input
+                            type="checkbox"
+                            checked={settingsUpiEnabled}
+                            onChange={e => setSettingsUpiEnabled(e.target.checked)}
+                            className="w-5 h-5 rounded text-amber-600 focus:ring-amber-500"
+                          />
+                          <span className="font-bold text-zinc-900 dark:text-zinc-100 text-sm">
+                            BHIM / UPI भुगतान चालू रखें
+                          </span>
+                        </label>
+                        <label className="flex items-center gap-3 cursor-pointer select-none">
+                          <input
+                            type="checkbox"
+                            checked={settingsOnlinePaymentEnabled}
+                            onChange={e => setSettingsOnlinePaymentEnabled(e.target.checked)}
+                            className="w-5 h-5 rounded text-amber-600 focus:ring-amber-500"
+                          />
+                          <span className="font-bold text-zinc-900 dark:text-zinc-100 text-sm">
+                            Card / NetBanking (Razorpay) चालू रखें
                           </span>
                         </label>
                       </div>
@@ -1949,6 +2065,132 @@ CREATE POLICY "Admin All Access" ON public.books FOR ALL USING (auth.role() = 'a
                         />
                       </div>
                     </div>
+                  </div>
+
+                  {/* FEATURE (2026-08-29): homepage section visibility +
+                      order manager — controls which of HomePage.tsx's
+                      sections show, and in what order. */}
+                  <div className="p-5 bg-emerald-500/5 dark:bg-zinc-800/50 rounded-2xl border border-emerald-500/20 space-y-3">
+                    <h4 className="font-bold text-sm text-emerald-800 dark:text-emerald-400 uppercase tracking-wider flex items-center gap-2">
+                      🧩 होमपेज सेक्शन दृश्यता व क्रम (Section Visibility & Order)
+                    </h4>
+                    <p className="text-xs text-zinc-500">Toggle a section off to hide it, or use the arrows to reorder.</p>
+                    <div className="space-y-2">
+                      {[...homepageSections].sort((a, b) => a.order - b.order).map((sec, idx, sorted) => (
+                        <div key={sec.id} className="flex items-center gap-3 p-3 bg-white dark:bg-zinc-900 rounded-xl border border-zinc-200 dark:border-zinc-700">
+                          <label className="flex items-center gap-2 flex-1 cursor-pointer select-none">
+                            <input
+                              type="checkbox"
+                              checked={sec.enabled}
+                              onChange={e => setHomepageSections(prev => prev.map(s => s.id === sec.id ? { ...s, enabled: e.target.checked } : s))}
+                              className="w-4 h-4 rounded text-amber-600"
+                            />
+                            <span className="text-xs font-bold">{sec.name}</span>
+                          </label>
+                          <button
+                            type="button"
+                            disabled={idx === 0}
+                            onClick={() => {
+                              const prevSec = sorted[idx - 1];
+                              setHomepageSections(prev => prev.map(s => {
+                                if (s.id === sec.id) return { ...s, order: prevSec.order };
+                                if (s.id === prevSec.id) return { ...s, order: sec.order };
+                                return s;
+                              }));
+                            }}
+                            className="p-1.5 rounded-lg bg-zinc-100 dark:bg-zinc-800 disabled:opacity-30 text-xs font-bold"
+                          >
+                            ↑
+                          </button>
+                          <button
+                            type="button"
+                            disabled={idx === sorted.length - 1}
+                            onClick={() => {
+                              const nextSec = sorted[idx + 1];
+                              setHomepageSections(prev => prev.map(s => {
+                                if (s.id === sec.id) return { ...s, order: nextSec.order };
+                                if (s.id === nextSec.id) return { ...s, order: sec.order };
+                                return s;
+                              }));
+                            }}
+                            className="p-1.5 rounded-lg bg-zinc-100 dark:bg-zinc-800 disabled:opacity-30 text-xs font-bold"
+                          >
+                            ↓
+                          </button>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+
+                  {/* FEATURE (2026-08-29): admin-managed footer columns —
+                      extra link columns rendered below the 4 built-in ones
+                      on every page's footer. */}
+                  <div className="p-5 bg-sky-500/5 dark:bg-zinc-800/50 rounded-2xl border border-sky-500/20 space-y-3">
+                    <div className="flex items-center justify-between">
+                      <h4 className="font-bold text-sm text-sky-800 dark:text-sky-400 uppercase tracking-wider flex items-center gap-2">
+                        🦶 अतिरिक्त फुटर कॉलम (Extra Footer Columns)
+                      </h4>
+                      <button
+                        type="button"
+                        onClick={() => setFooterColumns(prev => [...prev, { id: `fc-${Date.now()}`, title: 'New Column', links: [] }])}
+                        className="text-[11px] font-bold bg-sky-600 text-white px-3 py-1.5 rounded-lg"
+                      >
+                        + Add Column
+                      </button>
+                    </div>
+                    {footerColumns.length === 0 && <p className="text-xs text-zinc-500">No extra columns yet.</p>}
+                    {footerColumns.map(col => (
+                      <div key={col.id} className="p-3 bg-white dark:bg-zinc-900 rounded-xl border border-zinc-200 dark:border-zinc-700 space-y-2">
+                        <div className="flex items-center gap-2">
+                          <input
+                            type="text"
+                            value={col.title}
+                            onChange={e => setFooterColumns(prev => prev.map(c => c.id === col.id ? { ...c, title: e.target.value } : c))}
+                            placeholder="Column Title"
+                            className="flex-1 px-2.5 py-1.5 bg-zinc-100 dark:bg-zinc-800 border rounded-lg text-xs font-bold"
+                          />
+                          <button
+                            type="button"
+                            onClick={() => setFooterColumns(prev => prev.filter(c => c.id !== col.id))}
+                            className="text-rose-600 text-[11px] font-bold shrink-0"
+                          >
+                            Remove Column
+                          </button>
+                        </div>
+                        {col.links.map(link => (
+                          <div key={link.id} className="flex items-center gap-2 pl-3">
+                            <input
+                              type="text"
+                              value={link.label}
+                              onChange={e => setFooterColumns(prev => prev.map(c => c.id === col.id ? { ...c, links: c.links.map(l => l.id === link.id ? { ...l, label: e.target.value } : l) } : c))}
+                              placeholder="Link text"
+                              className="flex-1 px-2.5 py-1.5 bg-zinc-100 dark:bg-zinc-800 border rounded-lg text-[11px]"
+                            />
+                            <input
+                              type="text"
+                              value={link.url || ''}
+                              onChange={e => setFooterColumns(prev => prev.map(c => c.id === col.id ? { ...c, links: c.links.map(l => l.id === link.id ? { ...l, url: e.target.value } : l) } : c))}
+                              placeholder="https:// (leave blank for internal page)"
+                              className="flex-1 px-2.5 py-1.5 bg-zinc-100 dark:bg-zinc-800 border rounded-lg text-[11px] font-mono"
+                            />
+                            <button
+                              type="button"
+                              onClick={() => setFooterColumns(prev => prev.map(c => c.id === col.id ? { ...c, links: c.links.filter(l => l.id !== link.id) } : c))}
+                              className="text-rose-600 text-[10px] font-bold shrink-0"
+                            >
+                              ✕
+                            </button>
+                          </div>
+                        ))}
+                        <button
+                          type="button"
+                          onClick={() => setFooterColumns(prev => prev.map(c => c.id === col.id ? { ...c, links: [...c.links, { id: `fl-${Date.now()}`, label: 'New Link', page: 'home', url: '' }] } : c))}
+                          className="text-[10px] font-bold text-sky-700 dark:text-sky-400 pl-3"
+                        >
+                          + Add Link
+                        </button>
+                      </div>
+                    ))}
                   </div>
                 </div>
               )}
@@ -2424,11 +2666,47 @@ CREATE POLICY "Admin All Access" ON public.books FOR ALL USING (auth.role() = 'a
                         <div className="font-bold">{o.shippingAddress.fullName}</div>
                         <div className="text-[10px] text-zinc-500">{o.shippingAddress.city}, {o.shippingAddress.state} - {o.shippingAddress.pincode}</div>
                       </td>
-                      <td className="p-3">{o.courierName} ({o.trackingNumber})</td>
+                      <td className="p-3">
+                        {/* FIXED (2026-08-29 — "manual tracking update
+                            functionality"): courier + tracking number were
+                            display-only before; now editable inline, saved
+                            on blur via updateOrderDetails. */}
+                        <input
+                          type="text"
+                          defaultValue={o.courierName}
+                          onBlur={e => e.target.value !== o.courierName && updateOrderDetails(o.id, { courierName: e.target.value })}
+                          placeholder="Courier"
+                          className="w-full bg-zinc-100 dark:bg-zinc-800 border border-zinc-300 dark:border-zinc-700 rounded-lg px-2 py-1 text-[11px] mb-1"
+                        />
+                        <input
+                          type="text"
+                          defaultValue={o.trackingNumber}
+                          onBlur={e => e.target.value !== o.trackingNumber && updateOrderDetails(o.id, { trackingNumber: e.target.value })}
+                          placeholder="Tracking Number"
+                          className="w-full bg-zinc-100 dark:bg-zinc-800 border border-zinc-300 dark:border-zinc-700 rounded-lg px-2 py-1 text-[11px] font-mono"
+                        />
+                      </td>
                       <td className="p-3">
                         <select
                           value={o.orderStatus}
-                          onChange={e => updateOrderStatus(o.id, e.target.value as OrderStatus)}
+                          onChange={async e => {
+                            const newStatus = e.target.value as OrderStatus;
+                            // FIXED: routed through the secure server
+                            // endpoint (writes real order_status_history +
+                            // restores stock on cancel) instead of the old
+                            // client-side-only updateOrderStatus.
+                            const resp = await fetch('/api/admin/update-order-status', {
+                              method: 'POST',
+                              headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${sessionToken}` },
+                              body: JSON.stringify({ orderId: o.id, newStatus }),
+                            });
+                            if (resp.ok) {
+                              updateOrderStatus(o.id, newStatus); // local optimistic mirror
+                            } else {
+                              const d = await resp.json().catch(() => ({}));
+                              alert(d.error || 'Failed to update order status.');
+                            }
+                          }}
                           className="bg-zinc-100 dark:bg-zinc-800 border border-zinc-300 dark:border-zinc-700 rounded-lg px-2 py-1 font-bold text-xs"
                         >
                           <option value="Processing">Processing</option>
@@ -2437,6 +2715,9 @@ CREATE POLICY "Admin All Access" ON public.books FOR ALL USING (auth.role() = 'a
                           <option value="Delivered">Delivered</option>
                           <option value="Cancelled">Cancelled</option>
                         </select>
+                        <p className="text-[9px] text-zinc-400 mt-1">
+                          Shipped/Cancelled auto-updates stock (see BookContext.tsx)
+                        </p>
                       </td>
                     </tr>
                   ))}
@@ -3922,6 +4203,58 @@ CREATE POLICY "Admin All Access" ON public.books FOR ALL USING (auth.role() = 'a
                     <p className="text-[10px] font-semibold text-purple-700 dark:text-purple-300 mb-1">Live Stream Audio Test:</p>
                     <audio controls src={formSampleAudio} className="w-full h-8 rounded-lg" />
                   </div>
+                )}
+              </div>
+
+              {/* Book Trailer Video — YouTube link OR direct file upload */}
+              <div className="p-4 bg-rose-50/50 dark:bg-rose-950/20 rounded-2xl border border-rose-200/60 dark:border-rose-800/40 space-y-3">
+                <label className="font-bold flex items-center gap-1.5 text-rose-950 dark:text-rose-300 text-xs">
+                  <Video className="w-4 h-4 text-rose-600" />
+                  <span>Book Trailer Video (YouTube link OR upload a video file)</span>
+                </label>
+                <div className="flex gap-2 text-[11px] font-bold">
+                  <button
+                    type="button"
+                    onClick={() => setFormTrailerIsYoutube(true)}
+                    className={`px-3 py-1.5 rounded-lg ${formTrailerIsYoutube ? 'bg-rose-600 text-white' : 'bg-zinc-200 dark:bg-zinc-800'}`}
+                  >
+                    YouTube Link
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setFormTrailerIsYoutube(false)}
+                    className={`px-3 py-1.5 rounded-lg ${!formTrailerIsYoutube ? 'bg-rose-600 text-white' : 'bg-zinc-200 dark:bg-zinc-800'}`}
+                  >
+                    Upload Video File
+                  </button>
+                </div>
+                {formTrailerIsYoutube ? (
+                  <input
+                    type="text"
+                    value={formTrailerUrl}
+                    onChange={e => setFormTrailerUrl(e.target.value)}
+                    placeholder="https://www.youtube.com/watch?v=..."
+                    className="w-full px-3.5 py-2.5 bg-white dark:bg-zinc-900 border border-zinc-300 dark:border-zinc-700 rounded-xl text-xs"
+                  />
+                ) : (
+                  <div className="space-y-2">
+                    <input
+                      type="file"
+                      accept="video/mp4,video/webm,video/quicktime"
+                      onChange={handleTrailerFileUpload}
+                      disabled={isUploadingTrailer}
+                      className="w-full text-xs"
+                    />
+                    {isUploadingTrailer && <p className="text-[10px] text-rose-600 font-bold">Uploading...</p>}
+                    {formTrailerUrl && !formTrailerIsYoutube && (
+                      <video src={formTrailerUrl} controls className="w-full h-32 rounded-lg bg-black" />
+                    )}
+                  </div>
+                )}
+                {formTrailerUrl && (
+                  <button type="button" onClick={() => setFormTrailerUrl('')} className="text-[10px] text-rose-600 font-bold">
+                    Remove Trailer
+                  </button>
                 )}
               </div>
 

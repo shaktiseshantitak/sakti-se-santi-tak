@@ -85,6 +85,13 @@ export interface Book {
   dimensionsCm?: string;
   samplePdfUrl?: string;
   sampleAudioUrl?: string;
+  // FIXED (2026-08-29 — clarified: "Add Book" feature needed a video
+  // upload option, YouTube link OR direct file upload, not an "ad
+  // booking" system). Either a YouTube URL (embedded as a player) or a
+  // direct-uploaded video file URL can be set — trailerVideoIsYoutube
+  // tells the book-details page which kind it's rendering.
+  trailerVideoUrl?: string;
+  trailerVideoIsYoutube?: boolean;
   tableOfContents?: TableOfContentsItem[];
   frequentlyBoughtWithBookIds?: string[];
   tags: string[];
@@ -401,6 +408,13 @@ export interface SiteSettings {
   freeShippingThreshold?: number;
   taxPercentage: number;
   enableCod: boolean;
+  // FIXED (2026-08-29 — "payment mode toggle must work in real-time"):
+  // enableCod existed and was saved from the admin panel, but nothing on
+  // the checkout page ever read ANY of these — the payment method list
+  // was a hardcoded array, so toggling COD (or UPI/online payment) in the
+  // admin panel had zero effect on what a customer could actually select.
+  enableUpi: boolean;
+  enableOnlinePayment: boolean;
 
   // Hero Banner Overrides
   heroBannerOverrideTitle?: string;
@@ -439,6 +453,21 @@ export interface SiteSettings {
     twitter: string;
   };
   seo?: SeoSettings;
+  // FIXED (2026-08-29 — "Control Panel is dummy"): this field didn't
+  // exist on SiteSettings at all, even though the admin form built and
+  // saved it (`analytics: { googleAnalyticsId, facebookPixelId,
+  // googleMapsApiKey }`) — meaning a saved GA/Pixel ID had nowhere real to
+  // live and nothing ever read it back to actually inject the tracking
+  // scripts.
+  analytics?: {
+    googleAnalyticsId?: string;
+    facebookPixelId?: string;
+    googleMapsApiKey?: string;
+  };
+  // The Media Library admin section actually reads/writes this key at
+  // runtime (self-consistent, so functionally it already worked) — it
+  // was just never declared here, so it wasn't properly typed.
+  mediaFiles?: MediaFile[];
 }
 
 export type LiveStreamMode = 'video' | 'audio';

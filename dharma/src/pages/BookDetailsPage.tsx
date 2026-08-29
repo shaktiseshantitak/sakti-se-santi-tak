@@ -462,6 +462,24 @@ export const BookDetailsPage: React.FC<BookDetailsPageProps> = ({
             {activeTab === 'description' && (
               <div className="prose max-w-none text-xs sm:text-sm text-[#4A2C17] leading-relaxed whitespace-pre-line font-medium">
                 {book.longDescription || book.description}
+                {book.trailerVideoUrl && (
+                  <div className="not-prose mt-5">
+                    <h3 className="font-serif font-bold text-sm text-[#8B1E3F] mb-2">Book Trailer</h3>
+                    {book.trailerVideoIsYoutube ? (
+                      <div className="aspect-video rounded-2xl overflow-hidden border border-[#D4AF37]/40">
+                        <iframe
+                          src={book.trailerVideoUrl.replace('watch?v=', 'embed/')}
+                          className="w-full h-full"
+                          allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
+                          allowFullScreen
+                          title="Book Trailer"
+                        />
+                      </div>
+                    ) : (
+                      <video src={book.trailerVideoUrl} controls className="w-full rounded-2xl border border-[#D4AF37]/40 bg-black" />
+                    )}
+                  </div>
+                )}
               </div>
             )}
 

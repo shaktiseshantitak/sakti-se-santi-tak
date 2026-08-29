@@ -33,6 +33,28 @@ export const OrderTrackingPage: React.FC<OrderTrackingPageProps> = ({
   const [searchedOrder, setSearchedOrder] = useState<Order | null>(userOrders[0] || null);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [loading, setLoading] = useState<boolean>(false);
+  // FIXED (2026-08-29 — "Expand order tracking to show complete details:
+  // ...order status timeline. Customers should see all these details"):
+  // this used to be a fixed array of decorative, hardcoded dates/text
+  // ("Aug 01, 10:30 AM", "Quality Inspection & Moisture Seal") shown for
+  // EVERY order regardless of when it was actually placed. Now fetched
+  // from the real order_status_history table (written for real by
+  // /api/admin/update-order-status — see server.ts).
+  const [realHistory, setRealHistory] = useState<{ status: string; note: string | null; changedAt: string }[]>([]);
+
+  useEffect(() => {
+    if (!searchedOrder) { setRealHistory([]); return; }
+    import('../lib/supabase').then(({ supabase, isSupabaseConfigured }) => {
+      if (!isSupabaseConfigured || !supabase) return;
+      supabase.from('order_status_history')
+        .select('status, notes, created_at')
+        .eq('order_id', searchedOrder.id)
+        .order('created_at', { ascending: true })
+        .then(({ data }) => {
+          if (data) setRealHistory(data.map((r: any) => ({ status: r.status, note: r.notes, changedAt: r.created_at })));
+        });
+    });
+  }, [searchedOrder?.id]);
 
   useEffect(() => {
     if (initialTrackingNumber) {
@@ -123,14 +145,28 @@ export const OrderTrackingPage: React.FC<OrderTrackingPageProps> = ({
     handlePerformTrack(searchNum, emailOrPhone);
   };
 
-  const steps = [
-    { title: 'Order Placed & Reverently Bound', desc: 'Assi Ghat Printing Hub, Varanasi', time: 'Aug 01, 10:30 AM', done: true },
-    { title: 'Quality Inspection & Moisture Seal', desc: 'Passed Vedic Typo & Binding Verification', time: 'Aug 01, 02:15 PM', done: true },
-    { title: 'Handed to Courier Hub', desc: searchedOrder ? `Shipped via ${searchedOrder.courierName}` : 'Delhivery Express', time: 'Aug 01, 06:00 PM', done: true },
-    { title: 'In Transit to Destination Hub', desc: 'Regional Logistics Center', time: 'Aug 02, 08:00 AM', done: searchedOrder?.orderStatus === 'Shipped' || searchedOrder?.orderStatus === 'Out For Delivery' || searchedOrder?.orderStatus === 'Delivered' },
-    { title: 'Out for Express Delivery', desc: 'Assigned to Courier Executive', time: 'Pending', done: searchedOrder?.orderStatus === 'Out For Delivery' || searchedOrder?.orderStatus === 'Delivered' },
-    { title: 'Delivered to Sacred Home', desc: 'Signed & Received', time: 'Pending', done: searchedOrder?.orderStatus === 'Delivered' },
-  ];
+  // FIXED: was a fixed array of decorative fake dates/locations shown
+  // identically for every order. Now built from realHistory (real rows
+  // from order_status_history) when available; falls back to a single
+  // honest "Order Placed" entry (using the order's real createdAt) for
+  // orders placed before this table started being written to, rather
+  // than inventing fake intermediate steps for them.
+  const steps = realHistory.length > 0
+    ? realHistory.map(h => ({
+        title: h.status,
+        desc: h.note || '',
+        time: new Date(h.changedAt).toLocaleString('en-IN', { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' }),
+        done: true,
+      }))
+    : searchedOrder
+      ? [{
+          title: searchedOrder.orderStatus,
+          desc: '',
+          time: new Date(searchedOrder.createdAt).toLocaleString('en-IN', { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' }),
+          done: true,
+        }]
+      : [];
+
 
   return (
     <div className="py-8 bg-[#F8F4E8] text-[#4A2C17] min-h-screen">
@@ -202,6 +238,24 @@ export const OrderTrackingPage: React.FC<OrderTrackingPageProps> = ({
               <div className="text-right text-xs text-[#6E4E37] font-medium">
                 <p>Courier: <span className="font-bold text-[#8B1E3F]">{searchedOrder.courierName}</span></p>
                 <p>Expected Delivery: <span className="font-bold text-emerald-800">{searchedOrder.estimatedDeliveryDate}</span></p>
+              </div>
+            </div>
+
+            {/* FIXED: "Expand order tracking to show complete details:
+                payment status, shipping address..." — previously absent
+                from this page entirely. */}
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 text-xs">
+              <div className="p-4 bg-[#F8F4E8] rounded-2xl border border-[#D4AF37]/30">
+                <p className="font-bold text-[#8B1E3F] mb-1">Payment</p>
+                <p className="text-[#6E4E37]">Method: <span className="font-bold">{searchedOrder.paymentMethod}</span></p>
+                <p className="text-[#6E4E37]">Status: <span className={`font-bold ${searchedOrder.paymentStatus === 'Paid' ? 'text-emerald-700' : 'text-amber-700'}`}>{searchedOrder.paymentStatus}</span></p>
+              </div>
+              <div className="p-4 bg-[#F8F4E8] rounded-2xl border border-[#D4AF37]/30">
+                <p className="font-bold text-[#8B1E3F] mb-1">Shipping Address</p>
+                <p className="text-[#6E4E37]">{searchedOrder.shippingAddress.fullName}</p>
+                <p className="text-[#6E4E37]">
+                  {[searchedOrder.shippingAddress.addressLine1, searchedOrder.shippingAddress.city, searchedOrder.shippingAddress.state, searchedOrder.shippingAddress.pincode].filter(Boolean).join(', ')}
+                </p>
               </div>
             </div>
 

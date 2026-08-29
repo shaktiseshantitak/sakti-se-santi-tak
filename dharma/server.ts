@@ -188,6 +188,56 @@ const authenticateUser = async (req: Request) => {
   }
 };
 
+// FIXED (2026-08-29 — "orders placed even when payment fails"): shared by
+// the new /api/payment/cancel-unpaid-order endpoint AND every failure path
+// inside /api/payment/verify. Cancels an order that's still 'Awaiting
+// Payment' and restores the stock that was optimistically decremented at
+// order-creation time — see migration 015's increment_inventory. Guarded
+// so it only ever touches an order that's genuinely still unpaid (never a
+// real 'Processing'/'Paid' order), and is safe to call more than once.
+async function cancelUnpaidOrderAndRestoreStock(orderId: string, userId: string): Promise<boolean> {
+  if (!supabaseServer) return false;
+
+  const { data: order } = await supabaseServer
+    .from('orders')
+    .select('id, user_id, order_status')
+    .eq('id', orderId)
+    .single();
+
+  if (!order || order.user_id !== userId || order.order_status !== 'Awaiting Payment') {
+    return false; // already resolved (paid/cancelled) or not this user's order — no-op
+  }
+
+  const { data: items } = await supabaseServer
+    .from('order_items')
+    .select('book_id, quantity')
+    .eq('order_id', orderId);
+
+  for (const item of items || []) {
+    const { error } = await supabaseServer.rpc('increment_inventory', {
+      p_book_id: item.book_id,
+      p_quantity: item.quantity,
+    });
+    if (error) console.error(`[Cancel Unpaid Order] stock restore failed for ${item.book_id}:`, error);
+    else {
+      await supabaseServer.from('inventory_movements').insert([{
+        book_id: item.book_id,
+        change_quantity: item.quantity,
+        movement_type: 'ORDER_PAYMENT_FAILED',
+        reference_id: orderId,
+        notes: `Stock restored — order ${orderId} payment never completed.`,
+      }]);
+    }
+  }
+
+  await supabaseServer
+    .from('orders')
+    .update({ order_status: 'Cancelled', payment_status: 'Failed', updated_at: new Date().toISOString() })
+    .eq('id', orderId);
+
+  return true;
+}
+
 // Timing-safe comparison helper
 const timingSafeEqualString = (a: string, b: string): boolean => {
   try {
@@ -212,8 +262,94 @@ app.get('/api/health', (req: Request, res: Response) => {
   });
 });
 
+// FIXED (2026-08-29 — "Control Panel is dummy"): serves the admin's saved
+// robots.txt rules for real — see the netlify.toml redirect that routes
+// /robots.txt here, since Netlify would otherwise always serve the static
+// public/robots.txt file regardless of what's saved in site_settings.
+app.get('/api/seo/robots-txt', async (req: Request, res: Response) => {
+  res.set('Content-Type', 'text/plain');
+  const fallback = 'User-agent: *\nAllow: /\n\nSitemap: https://shaktiseshanti.com/sitemap.xml\n';
+  if (!supabaseServer) return res.send(fallback);
+  const { data } = await supabaseServer.from('site_settings').select('settings').eq('id', 'default').maybeSingle();
+  const rules = data?.settings?.seo?.robotsTxtRules;
+  res.send(rules && rules.trim() ? rules : fallback);
+});
+
 // ==========================================
-// 1B. GOOGLE SHEETS DAILY BACKUP (admin-triggered + scheduled)
+// 1C. ADMIN: UPDATE ORDER STATUS (real history + stock restore on cancel)
+// ==========================================
+// FIXED (2026-08-29 — "Implement manual tracking update... Customers
+// should see all these details in their order history/tracking page" +
+// "automatically update inventory... increase stock on cancellation"):
+// the old client-side updateOrderStatus only ever touched orders.order_
+// status — it never wrote to order_status_history (so the customer-facing
+// timeline had nothing real to show and fell back to decorative fixed
+// text) and never restored stock when an order was cancelled after
+// already being paid/confirmed (stock is reserved at order-confirmation
+// time — see /api/orders/create — so a cancellation needs to give it
+// back, or it's gone from inventory forever for a sale that didn't
+// happen).
+app.post('/api/admin/update-order-status', async (req: Request, res: Response) => {
+  try {
+    const user = await authenticateUser(req);
+    if (!user) return res.status(401).json({ error: 'Authentication required.' });
+    if (!supabaseServer) return res.status(500).json({ error: 'Database not configured.' });
+
+    const { data: roleRow } = await supabaseServer.from('user_roles').select('role').eq('user_id', user.id).single();
+    if (roleRow?.role !== 'admin') return res.status(403).json({ error: 'Admin privileges required.' });
+
+    const { orderId, newStatus, note } = req.body;
+    if (!orderId || !newStatus) return res.status(400).json({ error: 'orderId and newStatus are required.' });
+
+    const { data: order } = await supabaseServer.from('orders').select('id, order_status').eq('id', orderId).single();
+    if (!order) return res.status(404).json({ error: 'Order not found.' });
+
+    const wasAlreadyCancelled = order.order_status === 'Cancelled';
+
+    await supabaseServer.from('orders').update({
+      order_status: newStatus,
+      updated_at: new Date().toISOString(),
+    }).eq('id', orderId);
+
+    // Real, timestamped history entry — this is what the customer's
+    // tracking page timeline now actually reads from.
+    await supabaseServer.from('order_status_history').insert([{
+      order_id: orderId,
+      status: newStatus,
+      notes: note || null,
+      updated_by: user.id,
+    }]);
+
+    // Stock was reserved (decremented) the moment this order was
+    // confirmed/paid. Cancelling it after that point means that stock
+    // needs to come back — but only once, guarded against an order
+    // already sitting at 'Cancelled' being "re-cancelled".
+    if (newStatus === 'Cancelled' && !wasAlreadyCancelled) {
+      const { data: items } = await supabaseServer.from('order_items').select('book_id, quantity').eq('order_id', orderId);
+      for (const item of items || []) {
+        const { error: incErr } = await supabaseServer.rpc('increment_inventory', {
+          p_book_id: item.book_id, p_quantity: item.quantity,
+        });
+        if (!incErr) {
+          await supabaseServer.from('inventory_movements').insert([{
+            book_id: item.book_id,
+            change_quantity: item.quantity,
+            movement_type: 'ORDER_CANCELLED',
+            reference_id: orderId,
+            notes: `Stock restored — order ${orderId} cancelled by admin.`,
+          }]);
+        }
+      }
+    }
+
+    return res.json({ success: true });
+  } catch (err: any) {
+    console.error('[Admin Update Order Status] Failed:', err);
+    return res.status(500).json({ error: 'Failed to update order status.' });
+  }
+});
+
+
 // ==========================================
 // Runs once a day automatically (see netlify/functions/daily-backup.ts,
 // scheduled via netlify.toml), and can also be triggered on demand from
@@ -257,6 +393,18 @@ app.post('/api/orders/create', async (req: Request, res: Response) => {
     }
 
     const { items, shippingAddress, couponCode, paymentMethod, referralCode } = req.body;
+
+    // FIXED: server-side enforcement of admin payment-method toggles —
+    // never trust that a disabled method is only hidden client-side.
+    const { data: settingsRow } = await supabaseServer.from('site_settings').select('settings').eq('id', 'default').maybeSingle();
+    const s = settingsRow?.settings || {};
+    const methodAllowed =
+      paymentMethod === 'COD' ? (s.enableCod ?? true) :
+      paymentMethod === 'UPI' ? (s.enableUpi ?? true) :
+      (s.enableOnlinePayment ?? true);
+    if (!methodAllowed) {
+      return res.status(400).json({ error: `${paymentMethod} is currently unavailable. Please choose another payment method.` });
+    }
 
     if (!items || !Array.isArray(items) || items.length === 0) {
       return res.status(400).json({ error: 'Order must contain at least one valid item.' });
@@ -382,7 +530,17 @@ app.post('/api/orders/create', async (req: Request, res: Response) => {
         total_amount: finalTotalAmount,
         payment_method: paymentMethod || 'UPI',
         payment_status: paymentMethod === 'COD' ? 'Pending' : 'Pending Verification',
-        order_status: 'Processing',
+        // FIXED (2026-08-29 — "orders placed even when payment fails"):
+        // online-payment orders no longer start as 'Processing' (a status
+        // customers and admins see as a real, confirmed order). They start
+        // as 'Awaiting Payment' and only become 'Processing' once
+        // /api/payment/verify confirms a real successful payment — see
+        // migration 015. If the customer abandons/fails payment, this
+        // order gets explicitly cancelled and its stock restored instead
+        // of silently lingering as a phantom "Processing" order forever.
+        // COD is unaffected: COD payment is inherently deferred to
+        // delivery, so an immediate 'Processing' order is correct there.
+        order_status: paymentMethod === 'COD' ? 'Processing' : 'Awaiting Payment',
         coupon_code_used: couponCode || null,
         referral_code_used: validatedReferralCode,
         created_at: new Date().toISOString(),
@@ -574,6 +732,25 @@ app.post('/api/payment/create-order', async (req: Request, res: Response) => {
 });
 
 // ==========================================
+// 4B. CANCEL AN UNPAID ORDER (Razorpay popup closed / abandoned)
+// ==========================================
+app.post('/api/payment/cancel-unpaid-order', async (req: Request, res: Response) => {
+  try {
+    const user = await authenticateUser(req);
+    if (!user) return res.status(401).json({ success: false, error: 'Authentication required.' });
+
+    const { orderId } = req.body;
+    if (!orderId) return res.status(400).json({ success: false, error: 'orderId is required.' });
+
+    const cancelled = await cancelUnpaidOrderAndRestoreStock(orderId, user.id);
+    return res.json({ success: true, cancelled });
+  } catch (err: any) {
+    console.error('[Cancel Unpaid Order] Exception:', err);
+    return res.status(500).json({ success: false, error: 'Failed to cancel order.' });
+  }
+});
+
+// ==========================================
 // 4. SECURE RAZORPAY SIGNATURE VERIFICATION
 // ==========================================
 app.post('/api/payment/verify', async (req: Request, res: Response) => {
@@ -615,6 +792,7 @@ app.post('/api/payment/verify', async (req: Request, res: Response) => {
 
     // Verify razorpay_order_id matches database binding
     if (dbOrder.razorpay_order_id && dbOrder.razorpay_order_id !== razorpay_order_id) {
+      await cancelUnpaidOrderAndRestoreStock(orderId, user.id);
       return res.status(400).json({ success: false, error: 'Razorpay Order ID mismatch.' });
     }
 
@@ -624,6 +802,7 @@ app.post('/api/payment/verify', async (req: Request, res: Response) => {
     const generatedSignature = hmac.digest('hex');
 
     if (!timingSafeEqualString(generatedSignature, razorpay_signature)) {
+      await cancelUnpaidOrderAndRestoreStock(orderId, user.id);
       return res.status(400).json({ success: false, error: 'Invalid payment signature. Payment rejected.' });
     }
 

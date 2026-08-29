@@ -863,6 +863,8 @@ export const DEFAULT_SITE_SETTINGS: SiteSettings = {
   freeShippingThreshold: 499,
   taxPercentage: 5,
   enableCod: true,
+  enableUpi: true,
+  enableOnlinePayment: true,
 
   // Default Theme Settings
   theme: {

@@ -10,7 +10,13 @@ interface OrderSuccessPageProps {
 
 export const OrderSuccessPage: React.FC<OrderSuccessPageProps> = ({ orderId, onNavigate }) => {
   const { orders } = useBooks();
-  const order = orders.find(o => o.id === orderId) || orders[0];
+  // FIXED (2026-08-29 — invoice data integrity): `|| orders[0]` meant that
+  // if this exact orderId wasn't found yet (e.g. orders still loading, or
+  // a stale/incorrect id in the URL), the page silently rendered some
+  // OTHER random order's full invoice — name, address, phone, payment
+  // details — instead of showing a clear "not found" state. That's a real
+  // privacy problem, not just a cosmetic one.
+  const order = orders.find(o => o.id === orderId);
 
   const handlePrintInvoice = () => {
     window.print();

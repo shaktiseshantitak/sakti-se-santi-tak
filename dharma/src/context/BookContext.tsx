@@ -11,6 +11,7 @@ import {
   INITIAL_COUPONS, DEFAULT_SITE_SETTINGS
 } from '../data/initialData';
 import { getLocalData, setLocalData, supabase, isSupabaseConfigured } from '../lib/supabase';
+import { useAuth } from './AuthContext';
 import { BookFormat, BookLanguage } from '../types';
 
 function mapDbBookToBook(row: any): Book {
@@ -46,6 +47,8 @@ function mapDbBookToBook(row: any): Book {
     weightGrams: 500,
     tags: [],
     createdAt: row.created_at || new Date().toISOString(),
+    trailerVideoUrl: row.trailer_video_url || undefined,
+    trailerVideoIsYoutube: Boolean(row.trailer_video_is_youtube),
   };
 }
 
@@ -199,6 +202,12 @@ interface BookContextType {
   testimonials: Testimonial[];
   coupons: Coupon[];
   orders: Order[];
+  // FIXED (2026-08-29 — "Get in Touch with Our Publishing Desk data is not
+  // visible in the admin panel"): migration 008 created a real
+  // contact_messages table with admin-only RLS, but nothing in the admin
+  // UI ever queried or displayed it — submissions had nowhere to be read.
+  contactMessages: { id: string; name: string; email: string; subject: string; message: string; isRead: boolean; createdAt: string }[];
+  markContactMessageRead: (id: string) => void;
   auditLogs: AuditLog[];
   siteSettings: SiteSettings;
   
@@ -377,6 +386,20 @@ const INITIAL_SAMPLE_ORDERS: Order[] = [
 const BookContext = createContext<BookContextType | undefined>(undefined);
 
 export const BookProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
+  // FIXED (2026-08-29 — "customer cannot see their own orders"): the
+  // Supabase fetch below used to run exactly once, on BookProvider's very
+  // first mount, completely independent of auth state. Since it can fire
+  // before Supabase has finished restoring/attaching the person's session,
+  // the `orders` query could go out effectively unauthenticated — RLS then
+  // correctly returns zero rows for an anonymous request (`orders` is
+  // scoped to `user_id = auth.uid()`), that empty result was silently
+  // ignored (`if (oData.length > 0)`), and — because the effect never
+  // re-ran — the customer's real orders were never fetched again for the
+  // rest of that browser tab's life, even after their session fully
+  // loaded. Depending on `isAuthLoading`/`user?.id` makes this re-run
+  // once the auth state is actually settled, and again any time the
+  // logged-in user changes (login/logout/switch account).
+  const { isAuthLoading, user, isAdmin } = useAuth();
   const [books, setBooks] = useState<Book[]>(() => getLocalData('books', INITIAL_BOOKS));
   const [lastSyncError, setLastSyncError] = useState<string | null>(null);
   const clearSyncError = () => setLastSyncError(null);
@@ -398,12 +421,14 @@ export const BookProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const [testimonials, setTestimonials] = useState<Testimonial[]>(() => getLocalData('testimonials', INITIAL_TESTIMONIALS));
   const [coupons, setCoupons] = useState<Coupon[]>(() => getLocalData('coupons', INITIAL_COUPONS));
   const [orders, setOrders] = useState<Order[]>(() => getLocalData('orders', INITIAL_SAMPLE_ORDERS));
+  const [contactMessages, setContactMessages] = useState<BookContextType['contactMessages']>([]);
   const [auditLogs, setAuditLogs] = useState<AuditLog[]>(() => getLocalData('audit_logs', []));
   const [siteSettings, setSiteSettings] = useState<SiteSettings>(() => getLocalData('site_settings', DEFAULT_SITE_SETTINGS));
 
   // Load initial data from Supabase if configured
   useEffect(() => {
     if (!isSupabaseConfigured || !supabase) return;
+    if (isAuthLoading) return; // wait for the real session to settle first
 
     let isMounted = true;
 
@@ -443,6 +468,19 @@ export const BookProvider: React.FC<{ children: React.ReactNode }> = ({ children
         if (cpData && cpData.length > 0) setCoupons(cpData.map(mapDbCouponToCoupon));
         if (oData && oData.length > 0) setOrders(oData.map(mapDbOrderToOrder));
         if (stData?.settings) setSiteSettings(stData.settings as SiteSettings);
+
+        // Admin-only — RLS restricts contact_messages SELECT to admins, so
+        // this only fetches meaningful data when isAdmin is true; harmless
+        // no-op (empty result) for anyone else.
+        if (isAdmin) {
+          const { data: cmData } = await supabase!.from('contact_messages').select('*').order('created_at', { ascending: false });
+          if (isMounted && cmData) {
+            setContactMessages(cmData.map((r: any) => ({
+              id: r.id, name: r.name, email: r.email, subject: r.subject || '', message: r.message,
+              isRead: Boolean(r.is_read), createdAt: r.created_at,
+            })));
+          }
+        }
         if (blData && blData.length > 0) setBlogs(blData.map(mapDbBlogToBlog));
         if (lgData && lgData.length > 0) {
           setAuditLogs(lgData.map((l: any) => ({
@@ -461,8 +499,33 @@ export const BookProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
     loadSupabaseData();
 
-    return () => { isMounted = false; };
-  }, []);
+    // FIXED ("payment mode toggle must work in real-time"): admin toggles
+    // for COD/UPI/online payment (site_settings) previously only reached
+    // a customer already on the checkout page after a full page reload.
+    // A live Supabase Realtime subscription pushes the change to anyone
+    // already browsing the instant the admin saves it — no refresh needed.
+    const settingsChannel = supabase
+      .channel('site_settings_realtime')
+      .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'site_settings', filter: 'id=eq.default' },
+        (payload: any) => {
+          if (payload.new?.settings) setSiteSettings(payload.new.settings as SiteSettings);
+        })
+      .subscribe();
+
+    return () => {
+      isMounted = false;
+      supabase!.removeChannel(settingsChannel);
+    };
+  }, [isAuthLoading, user?.id]);
+
+  const markContactMessageRead = (id: string) => {
+    setContactMessages(prev => prev.map(m => m.id === id ? { ...m, isRead: true } : m));
+    if (isSupabaseConfigured && supabase) {
+      supabase.from('contact_messages').update({ is_read: true }).eq('id', id).then(({ error }) => {
+        if (error) reportSyncError('contact message mark-read', error);
+      });
+    }
+  };
 
   // Sync to local storage when Supabase is not configured
   useEffect(() => { if (!isSupabaseConfigured) setLocalData('books', books); }, [books]);
@@ -529,6 +592,8 @@ export const BookProvider: React.FC<{ children: React.ReactNode }> = ({ children
         description: newBook.description,
         is_bestseller: newBook.isBestSeller || false,
         rating: newBook.rating || 5.0,
+        trailer_video_url: newBook.trailerVideoUrl || null,
+        trailer_video_is_youtube: newBook.trailerVideoIsYoutube || false,
       }).then(({ error }) => {
         if (error) reportSyncError('book insert', error);
       });
@@ -551,6 +616,8 @@ export const BookProvider: React.FC<{ children: React.ReactNode }> = ({ children
       if (updated.isBestSeller !== undefined) updatePayload.is_bestseller = updated.isBestSeller;
       if (updated.description !== undefined) updatePayload.description = updated.description;
       if (updated.coverImage !== undefined) updatePayload.cover_image = updated.coverImage;
+      if (updated.trailerVideoUrl !== undefined) updatePayload.trailer_video_url = updated.trailerVideoUrl;
+      if (updated.trailerVideoIsYoutube !== undefined) updatePayload.trailer_video_is_youtube = updated.trailerVideoIsYoutube;
       updatePayload.updated_at = new Date().toISOString();
 
       supabase.from('books').update(updatePayload).eq('id', id).then(({ error }) => {
@@ -1014,6 +1081,14 @@ export const BookProvider: React.FC<{ children: React.ReactNode }> = ({ children
     return newOrder;
   };
 
+  // FIXED (2026-08-29 self-audit — redundant duplicate write): this used
+  // to also fire its own `supabase.from('orders').update(...)` call. Its
+  // only caller (Admin Orders tab) now goes through the secure
+  // /api/admin/update-order-status server endpoint FIRST (which does the
+  // real write, plus order_status_history + stock restore) and calls this
+  // only afterward, purely to update local React state so the UI reflects
+  // the change immediately. Keeping a second network write here was
+  // genuinely pointless duplicate work, not just harmless — removed.
   const updateOrderStatus = (id: string, status: Order['orderStatus']) => {
     setOrders(prev => prev.map(ord => {
       if (ord.id !== id) return ord;
@@ -1034,15 +1109,6 @@ export const BookProvider: React.FC<{ children: React.ReactNode }> = ({ children
       };
     }));
     addAuditLog('UPDATE', 'Order', `Updated Order ${id} status to ${status}`);
-
-    if (isSupabaseConfigured && supabase) {
-      supabase.from('orders').update({
-        order_status: status,
-        updated_at: new Date().toISOString()
-      }).eq('id', id).then(({ error }) => {
-        if (error) reportSyncError('order status update', error);
-      });
-    }
   };
 
   const updateOrderDetails = (id: string, details: Partial<Order>) => {
@@ -1130,6 +1196,8 @@ export const BookProvider: React.FC<{ children: React.ReactNode }> = ({ children
         testimonials,
         coupons,
         orders,
+        contactMessages,
+        markContactMessageRead,
         auditLogs,
         siteSettings,
         addBook,

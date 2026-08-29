@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { ShieldCheck, Truck, CreditCard, Lock, ShieldAlert, QrCode } from 'lucide-react';
 import { Breadcrumbs } from '../components/common/Breadcrumbs';
 import { useCart } from '../context/CartContext';
@@ -15,24 +15,54 @@ interface CheckoutPageProps {
 export const CheckoutPage: React.FC<CheckoutPageProps> = ({ onNavigate }) => {
   const { cart, subtotal, discountAmount, taxAmount, shippingCharge, totalAmount, clearCart, appliedCoupon } = useCart();
   const { user, sessionToken } = useAuth();
-  const { createOrder } = useBooks();
+  const { createOrder, siteSettings } = useBooks();
   const { processOrderCommission } = useAffiliate();
 
+  // FIXED (2026-08-29 — "customer addresses are hardcoded, must reflect
+  // real database data"): a brand-new customer with no saved address used
+  // to have their city/state/pincode PRE-FILLED with the shop's own
+  // Varanasi / Uttar Pradesh / 221005 — not their real address. If they
+  // didn't notice and change it, their order could ship to the wrong
+  // place. Left blank now, so the form genuinely reflects "no address on
+  // file yet" instead of silently substituting the seller's own location.
   const defaultAddress = user?.addresses[0] || {
     fullName: user?.fullName || '',
     phone: user?.phone || '',
     email: user?.email || '',
     addressLine1: '',
     addressLine2: '',
-    city: 'Varanasi',
-    state: 'Uttar Pradesh',
-    pincode: '221005',
+    city: '',
+    state: '',
+    pincode: '',
     country: 'India',
   };
 
   const [address, setAddress] = useState<OrderAddress>(defaultAddress);
+  const [hasAppliedSavedAddress, setHasAppliedSavedAddress] = useState<boolean>(Boolean(user?.addresses?.[0]));
+
+  // FIXED: user.addresses can finish loading from Supabase AFTER this page
+  // has already mounted (e.g. navigating here directly). The form used to
+  // capture `defaultAddress` exactly once at mount via useState's
+  // initializer and never look at user.addresses again — so a returning
+  // customer with a real saved address could still see a blank form.
+  // Only auto-fills once, and only if the customer hasn't already started
+  // typing their own values (never overwrites active edits).
+  useEffect(() => {
+    if (!hasAppliedSavedAddress && user?.addresses?.[0]) {
+      setAddress(user.addresses[0]);
+      setHasAppliedSavedAddress(true);
+    }
+  }, [user?.addresses, hasAppliedSavedAddress]);
   const [courier, setCourier] = useState<ShippingCourier>('Delhivery');
   const [paymentMethod, setPaymentMethod] = useState<PaymentMethod>('UPI');
+  // FIXED (2026-08-29 — "BHIM UPI Integration: UPI ID field + QR code"):
+  // there was no UPI ID input at all, and the Razorpay modal always opened
+  // to its generic all-methods screen. Below, this VPA is passed as
+  // prefill.vpa and the modal is configured to open straight into the UPI
+  // tab (which is where Razorpay renders its own scannable QR code) —
+  // reusing the SAME secure, backend-signature-verified payment flow
+  // already fixed earlier, rather than a separate unverified QR path.
+  const [upiId, setUpiId] = useState<string>('');
   const [isSubmitting, setIsSubmitting] = useState<boolean>(false);
   const [honeypot, setHoneypot] = useState<string>('');
   const [securityError, setSecurityError] = useState<string | null>(null);
@@ -157,7 +187,22 @@ export const CheckoutPage: React.FC<CheckoutPageProps> = ({ onNavigate }) => {
                   name: cleanAddress.fullName,
                   email: cleanAddress.email,
                   contact: cleanAddress.phone,
+                  ...(paymentMethod === 'UPI' && upiId ? { method: 'upi', vpa: upiId } : {}),
                 },
+                // Opens straight into the UPI tab (QR code + VPA entry +
+                // intent apps) instead of the generic all-methods screen,
+                // when the customer picked BHIM/UPI on our own page.
+                ...(paymentMethod === 'UPI' ? {
+                  config: {
+                    display: {
+                      blocks: {
+                        upi: { name: 'Pay via UPI', instruments: [{ method: 'upi' }] },
+                      },
+                      sequence: ['block.upi'],
+                      preferences: { show_default_blocks: false },
+                    },
+                  },
+                } : {}),
                 theme: { color: '#8B1E3F' },
                 handler: async (response: any) => {
                   const verifyRes = await fetch('/api/payment/verify', {
@@ -178,14 +223,36 @@ export const CheckoutPage: React.FC<CheckoutPageProps> = ({ onNavigate }) => {
                   if (verifyData.success) {
                     finalizeOrder(apiResult, verifyData.transactionId, 'Paid', cleanAddress);
                   } else {
-                    setSecurityError(verifyData.error || 'Payment verification failed.');
+                    // FIXED (2026-08-29 — "orders placed even when payment
+                    // fails"): server-side /api/payment/verify already
+                    // cancels the order + restores stock on a failed
+                    // signature check (see cancelUnpaidOrderAndRestoreStock
+                    // in server.ts). This just surfaces that clearly to the
+                    // customer instead of leaving them thinking their order
+                    // might still be sitting there pending.
+                    setSecurityError((verifyData.error || 'Payment verification failed.') + ' Your order was not placed.');
                     setIsSubmitting(false);
                   }
                 },
                 modal: {
                   ondismiss: () => {
+                    // FIXED (2026-08-29 — same bug): closing the Razorpay
+                    // popup used to just show an error locally while the
+                    // order created moments earlier by /api/orders/create
+                    // stayed in the database as a real-looking "Processing"
+                    // order forever, with stock already deducted for it.
+                    // Now explicitly cancelled server-side and its stock
+                    // restored the moment the popup is dismissed.
+                    fetch('/api/payment/cancel-unpaid-order', {
+                      method: 'POST',
+                      headers: {
+                        'Content-Type': 'application/json',
+                        'Authorization': `Bearer ${sessionToken}`,
+                      },
+                      body: JSON.stringify({ orderId: apiResult.orderId }),
+                    }).catch(() => {});
                     setIsSubmitting(false);
-                    setSecurityError('Payment window closed before completion.');
+                    setSecurityError('Payment window closed before completion. Your order was not placed.');
                   },
                 },
               };
@@ -194,12 +261,25 @@ export const CheckoutPage: React.FC<CheckoutPageProps> = ({ onNavigate }) => {
               rzp.open();
               return;
             } else {
-              setSecurityError(payData.error || 'Payment Gateway is not configured.');
+              // FIXED: Razorpay order creation itself failing also left an
+              // 'Awaiting Payment' order + deducted stock behind with no
+              // popup ever shown — same bug, different failure point.
+              fetch('/api/payment/cancel-unpaid-order', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${sessionToken}` },
+                body: JSON.stringify({ orderId: apiResult.orderId }),
+              }).catch(() => {});
+              setSecurityError(payData.error || 'Payment Gateway is not configured. Your order was not placed.');
               setIsSubmitting(false);
               return;
             }
           } catch (payErr: any) {
-            setSecurityError('Online payment processing failed.');
+            fetch('/api/payment/cancel-unpaid-order', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${sessionToken}` },
+              body: JSON.stringify({ orderId: apiResult.orderId }),
+            }).catch(() => {});
+            setSecurityError('Online payment processing failed. Your order was not placed.');
             setIsSubmitting(false);
             return;
           }
@@ -415,7 +495,20 @@ export const CheckoutPage: React.FC<CheckoutPageProps> = ({ onNavigate }) => {
               </h2>
 
               <div className="grid grid-cols-2 sm:grid-cols-3 gap-3 text-xs">
-                {(['Razorpay', 'UPI', 'Card', 'COD'] as PaymentMethod[]).map(m => (
+                {/* FIXED ("payment mode toggle must work in real-time"):
+                    this list used to be a hardcoded array — admin toggles
+                    in site_settings (enableCod/enableUpi/enableOnlinePayment)
+                    were saved but never actually read here. Now filtered
+                    live against siteSettings, which itself updates
+                    instantly via the Realtime subscription in
+                    BookContext.tsx. */}
+                {(['Razorpay', 'UPI', 'Card', 'COD'] as PaymentMethod[])
+                  .filter(m => {
+                    if (m === 'COD') return siteSettings.enableCod ?? true;
+                    if (m === 'UPI') return siteSettings.enableUpi ?? true;
+                    return siteSettings.enableOnlinePayment ?? true; // Razorpay / Card
+                  })
+                  .map(m => (
                   <button
                     key={m}
                     type="button"
@@ -431,6 +524,21 @@ export const CheckoutPage: React.FC<CheckoutPageProps> = ({ onNavigate }) => {
                   </button>
                 ))}
               </div>
+
+              {paymentMethod === 'UPI' && (
+                <div className="pt-1">
+                  <label className="text-[11px] font-bold text-[#6E4E37] block mb-1">
+                    Apna UPI ID daalein (optional) — ya popup mein QR code scan karke bhi pay kar sakte hain
+                  </label>
+                  <input
+                    type="text"
+                    value={upiId}
+                    onChange={e => setUpiId(e.target.value)}
+                    placeholder="yourname@upi"
+                    className="w-full px-3.5 py-2.5 bg-[#F8F4E8] border border-[#D4AF37]/40 rounded-xl text-xs font-mono"
+                  />
+                </div>
+              )}
             </div>
           </div>
 

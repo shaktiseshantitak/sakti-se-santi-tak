@@ -493,21 +493,17 @@ export const MobileMenu: React.FC<MobileMenuProps> = ({
               )}
             </button>
 
-            <div className="flex gap-2">
-              <button
-                onClick={toggleLanguage}
-                className="flex-1 py-2.5 px-3 rounded-xl bg-[#FFF8EE] hover:bg-[#F8F4E8] text-[#4A2C17] border border-[#D4AF37]/40 font-bold flex items-center justify-center gap-1.5"
-              >
-                <Globe className="w-4 h-4 text-[#8B1E3F]" />
-                {language === 'hi' ? 'हिंदी | EN' : 'EN | हिंदी'}
-              </button>
-              <button
-                onClick={toggleTheme}
-                className="flex-1 py-2.5 px-3 rounded-xl bg-[#FFF8EE] hover:bg-[#F8F4E8] text-[#4A2C17] border border-[#D4AF37]/40 font-bold flex items-center justify-center gap-1.5"
-              >
-                <Sun className="w-4 h-4 text-[#8B1E3F]" /> थीम
-              </button>
-            </div>
+            {/* FIXED (2026-08-29 — "remove day/night theme toggle button,
+                it serves no purpose"): removed here and in Navbar.tsx.
+                Language switcher kept (and made functional — see
+                LanguageContext.tsx). */}
+            <button
+              onClick={toggleLanguage}
+              className="w-full py-2.5 px-3 rounded-xl bg-[#FFF8EE] hover:bg-[#F8F4E8] text-[#4A2C17] border border-[#D4AF37]/40 font-bold flex items-center justify-center gap-1.5"
+            >
+              <Globe className="w-4 h-4 text-[#8B1E3F]" />
+              {language === 'hi' ? 'हिंदी | EN' : 'EN | हिंदी'}
+            </button>
 
             {/* Same as Navbar.tsx — only show this to an already-authenticated
                 admin; the public "Admin Portal Login" entry was removed. */}

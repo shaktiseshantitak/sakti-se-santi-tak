@@ -47,6 +47,36 @@ export const EnterpriseCmsInjector: React.FC<EnterpriseCmsInjectorProps> = ({ on
       .replace(/</g, '&lt;')
       .replace(/>/g, '&gt;');
 
+    // FIXED (2026-08-29 — "Admin Control Panel is fully dummy, no real
+    // effect"): saving Primary/Secondary Color here always genuinely
+    // wrote to the database — that part was never fake. But .bg-cms-
+    // primary / .text-cms-primary / etc. (the classes actually driven by
+    // these CSS variables) were never used by a single component
+    // anywhere in the site — every page hardcodes the brand colors
+    // directly as Tailwind arbitrary values (bg-[#8B1E3F], border-[#D4AF37],
+    // etc.), so changing the setting and hitting Save had ZERO visible
+    // effect anywhere, which is exactly what "dummy" looks like from the
+    // admin's side. Retrofitting every one of the 1000+ hardcoded color
+    // instances across 50+ files to use CSS variables instead would be a
+    // large, risky rewrite of the whole visual design — not appropriate
+    // here. Instead, this overrides Tailwind's own generated selectors
+    // for the exact two core brand hex values (only the flagship maroon
+    // #8B1E3F and gold #D4AF37 — not their many intentionally-different
+    // shades like hover/darker variants, which stay untouched so the
+    // site's depth/shading isn't flattened) so a saved color change now
+    // has a real, immediate, site-wide effect without touching those 50+
+    // component files.
+    const primaryOverrideCss = primaryColor.toUpperCase() !== '#8B1E3F' ? `
+      .bg-\\[\\#8B1E3F\\] { background-color: var(--cms-primary-color) !important; }
+      .text-\\[\\#8B1E3F\\] { color: var(--cms-primary-color) !important; }
+      .border-\\[\\#8B1E3F\\] { border-color: var(--cms-primary-color) !important; }
+    ` : '';
+    const secondaryOverrideCss = secondaryColor.toUpperCase() !== '#D4AF37' ? `
+      .bg-\\[\\#D4AF37\\] { background-color: var(--cms-secondary-color) !important; }
+      .text-\\[\\#D4AF37\\] { color: var(--cms-secondary-color) !important; }
+      .border-\\[\\#D4AF37\\] { border-color: var(--cms-secondary-color) !important; }
+    ` : '';
+
     styleEl.textContent = `
       :root {
         --cms-primary-color: ${primaryColor};
@@ -59,7 +89,9 @@ export const EnterpriseCmsInjector: React.FC<EnterpriseCmsInjectorProps> = ({ on
       .bg-cms-secondary { background-color: var(--cms-secondary-color) !important; }
       .text-cms-secondary { color: var(--cms-secondary-color) !important; }
       .border-cms-secondary { border-color: var(--cms-secondary-color) !important; }
-      
+      ${primaryOverrideCss}
+      ${secondaryOverrideCss}
+
       ${safeCustomCss}
     `;
 
@@ -68,6 +100,51 @@ export const EnterpriseCmsInjector: React.FC<EnterpriseCmsInjectorProps> = ({ on
     const existingScript = document.getElementById(scriptId);
     if (existingScript) {
       existingScript.remove();
+    }
+
+    // FIXED (2026-08-29 — "Control Panel is dummy"): Google Analytics ID
+    // and Facebook Pixel ID were captured and saved by the admin form but
+    // never actually injected anywhere — the site never loaded either
+    // script no matter what the admin entered. These are trusted
+    // first-party tracking IDs the admin enters themselves (not arbitrary
+    // user input), so injecting the standard, well-known GA4/Pixel loader
+    // snippets for them is safe — this is not the same as the removed
+    // arbitrary custom-JS feature above.
+    const gaId = siteSettings?.analytics?.googleAnalyticsId;
+    const gaScriptId = 'enterprise-ga4-script';
+    if (gaId && !document.getElementById(gaScriptId)) {
+      const gaScript1 = document.createElement('script');
+      gaScript1.id = gaScriptId;
+      gaScript1.async = true;
+      gaScript1.src = `https://www.googletagmanager.com/gtag/js?id=${encodeURIComponent(gaId)}`;
+      document.head.appendChild(gaScript1);
+
+      const gaScript2 = document.createElement('script');
+      gaScript2.id = `${gaScriptId}-inline`;
+      gaScript2.textContent = `
+        window.dataLayer = window.dataLayer || [];
+        function gtag(){dataLayer.push(arguments);}
+        gtag('js', new Date());
+        gtag('config', '${gaId.replace(/[^a-zA-Z0-9_-]/g, '')}');
+      `;
+      document.head.appendChild(gaScript2);
+    }
+
+    const pixelId = siteSettings?.analytics?.facebookPixelId;
+    const pixelScriptId = 'enterprise-fb-pixel-script';
+    if (pixelId && !document.getElementById(pixelScriptId)) {
+      const pixelScript = document.createElement('script');
+      pixelScript.id = pixelScriptId;
+      pixelScript.textContent = `
+        !function(f,b,e,v,n,t,s){if(f.fbq)return;n=f.fbq=function(){n.callMethod?
+        n.callMethod.apply(n,arguments):n.queue.push(arguments)};if(!f._fbq)f._fbq=n;
+        n.push=n;n.loaded=!0;n.version='2.0';n.queue=[];t=b.createElement(e);t.async=!0;
+        t.src=v;s=b.getElementsByTagName(e)[0];s.parentNode.insertBefore(t,s)}(window,
+        document,'script','https://connect.facebook.net/en_US/fbevents.js');
+        fbq('init', '${pixelId.replace(/[^0-9]/g, '')}');
+        fbq('track', 'PageView');
+      `;
+      document.head.appendChild(pixelScript);
     }
   }, [siteSettings, theme]);
 

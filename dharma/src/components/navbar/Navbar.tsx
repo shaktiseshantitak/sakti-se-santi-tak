@@ -154,9 +154,22 @@ export const Navbar: React.FC<NavbarProps> = ({ onNavigate, currentPage, onOpenL
           onClick={() => onNavigate('home')}
           className="flex items-center gap-1.5 sm:gap-2.5 cursor-pointer group shrink-0"
         >
-          <div className="w-8 h-8 sm:w-10 sm:h-10 rounded-xl bg-[#D4AF37] text-[#66122C] flex items-center justify-center shadow-sm group-hover:scale-105 transition-transform border border-amber-200 shrink-0">
-            <span className="text-base sm:text-xl font-serif font-extrabold">ॐ</span>
-          </div>
+          {/* FIXED (2026-08-29 — "Control Panel is dummy"): admin's Logo
+              URL upload (siteSettings.header.logoUrl) was saved but never
+              read here — the ॐ symbol showed regardless of what the admin
+              set. Now used when present, falling back to the original ॐ
+              mark otherwise. */}
+          {siteSettings.header?.logoUrl ? (
+            <img
+              src={siteSettings.header.logoUrl}
+              alt={siteSettings.siteName || 'Logo'}
+              className="w-8 h-8 sm:w-10 sm:h-10 rounded-xl object-cover shadow-sm group-hover:scale-105 transition-transform border border-amber-200 shrink-0"
+            />
+          ) : (
+            <div className="w-8 h-8 sm:w-10 sm:h-10 rounded-xl bg-[#D4AF37] text-[#66122C] flex items-center justify-center shadow-sm group-hover:scale-105 transition-transform border border-amber-200 shrink-0">
+              <span className="text-base sm:text-xl font-serif font-extrabold">ॐ</span>
+            </div>
+          )}
           <div className="min-w-0">
             <div className="flex items-center gap-1">
               <span className="font-serif font-bold text-sm sm:text-lg md:text-xl text-white tracking-tight whitespace-nowrap">
@@ -277,16 +290,6 @@ export const Navbar: React.FC<NavbarProps> = ({ onNavigate, currentPage, onOpenL
             <span>{language === 'hi' ? 'हिंदी|EN' : 'EN|हिंदी'}</span>
           </button>
 
-          {/* Theme toggle — desktop only now, moved into mobile menu */}
-          <button
-            onClick={toggleTheme}
-            className="hidden md:flex p-1.5 sm:p-2 rounded-xl text-amber-200 hover:bg-[#66122C] transition-colors shrink-0"
-            title="Sacred Luxury Theme"
-            aria-label="Toggle theme mode"
-          >
-            <Sun className="w-4 h-4 sm:w-5 sm:h-5 text-[#F4E285]" aria-hidden="true" />
-          </button>
-
           {/* Wishlist — desktop only now, moved into mobile menu */}
           <button
             onClick={() => onNavigate('wishlist')}
@@ -302,24 +305,11 @@ export const Navbar: React.FC<NavbarProps> = ({ onNavigate, currentPage, onOpenL
             )}
           </button>
 
-          {/* Admin Panel Quick Button — only shown to an already-authenticated
-              admin, as a shortcut to their dashboard. The "Admin Login" link
-              for logged-out visitors used to be shown here too, publicly
-              advertising that an admin panel exists and inviting anyone to
-              go find it — removed per bug report; admin login now only has
-              its own unlisted URL (see App.tsx's PATH_TO_PAGE), not a public
-              nav entry. */}
-          {isAdmin && (
-            <button
-              onClick={() => onNavigate('admin')}
-              className="hidden sm:flex px-2 sm:px-3 py-1.5 rounded-xl text-[11px] sm:text-xs font-extrabold transition-all items-center gap-1 sm:gap-1.5 shrink-0 bg-[#D4AF37] text-[#3A1F0D] hover:bg-amber-400 border border-amber-200 shadow-sm"
-              title="Open Admin Dashboard"
-              aria-label="Open Admin Dashboard"
-            >
-              <ShieldCheck className="w-3.5 h-3.5 sm:w-4 sm:h-4 text-[#F4E285] shrink-0" />
-              <span className="hidden xs:inline">एडमिन पैनल</span>
-            </button>
-          )}
+          {/* FIXED (2026-08-29 — "Remove the Open Admin Desktop button, it
+              serves no purpose"): this was a desktop-only shortcut button
+              shown to already-logged-in admins. Removed per request — an
+              admin can still reach the panel by navigating to /admin
+              directly once authenticated. */}
 
           {/* Cart Drawer Trigger — always visible on mobile too, this is a
               standard expected e-commerce icon */}
@@ -373,7 +363,7 @@ export const Navbar: React.FC<NavbarProps> = ({ onNavigate, currentPage, onOpenL
                 currentPage === 'book-details' || currentPage === 'books' ? 'text-[#F4E285] font-extrabold underline decoration-[#D4AF37] decoration-2 underline-offset-4' : ''
               }`}
             >
-              📖 शक्ति से शांति (Books)
+              📖 {t('शक्ति से शांति (Books)', 'Shakti Se Shanti (Books)')}
             </button>
 
             <button
@@ -382,7 +372,7 @@ export const Navbar: React.FC<NavbarProps> = ({ onNavigate, currentPage, onOpenL
                 currentPage === 'curiosity' ? 'text-[#F4E285] font-extrabold underline decoration-[#D4AF37] decoration-2 underline-offset-4' : ''
               }`}
             >
-              💡 जिज्ञासा व विज्ञान (Services)
+              💡 {t('जिज्ञासा व विज्ञान (Services)', 'Curiosity & Science (Services)')}
             </button>
 
             <button
@@ -391,7 +381,7 @@ export const Navbar: React.FC<NavbarProps> = ({ onNavigate, currentPage, onOpenL
                 currentPage === 'gayatri-secrets' ? 'text-[#F4E285] font-extrabold underline decoration-[#D4AF37] decoration-2 underline-offset-4' : ''
               }`}
             >
-              🔮 गायत्री रहस्य (24 शक्तियां)
+              🔮 {t('गायत्री रहस्य (24 शक्तियां)', 'Gayatri Secrets (24 Powers)')}
             </button>
 
             <button
@@ -400,7 +390,7 @@ export const Navbar: React.FC<NavbarProps> = ({ onNavigate, currentPage, onOpenL
                 currentPage === 'authors' ? 'text-[#F4E285] font-extrabold underline decoration-[#D4AF37] decoration-2 underline-offset-4' : ''
               }`}
             >
-              ✍️ लेखक परिचय
+              ✍️ {t('लेखक परिचय', 'Meet the Authors')}
             </button>
 
             <button
@@ -409,7 +399,7 @@ export const Navbar: React.FC<NavbarProps> = ({ onNavigate, currentPage, onOpenL
                 currentPage === 'gallery' ? 'text-[#F4E285] font-extrabold underline decoration-[#D4AF37] decoration-2 underline-offset-4' : ''
               }`}
             >
-              🖼️ गैलरी (Gallery)
+              🖼️ {t('गैलरी (Gallery)', 'Gallery')}
             </button>
 
             <button
@@ -418,7 +408,7 @@ export const Navbar: React.FC<NavbarProps> = ({ onNavigate, currentPage, onOpenL
                 currentPage === 'reviews' ? 'text-[#F4E285] font-extrabold underline decoration-[#D4AF37] decoration-2 underline-offset-4' : ''
               }`}
             >
-              💬 पाठकों के अनुभव
+              💬 {t('पाठकों के अनुभव', "Readers' Experiences")}
             </button>
 
             <button
