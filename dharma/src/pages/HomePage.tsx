@@ -42,25 +42,32 @@ export const HomePage: React.FC<HomePageProps> = ({
     onNavigate('checkout', { directBook: targetBook });
   };
 
-  // FEATURE (2026-08-29 — admin-controlled section visibility/order): each
-  // of the 5 sections below is now keyed so siteSettings.homepageSections
-  // (edited in Admin -> Settings -> Homepage) can toggle it on/off and
-  // reorder it, without changing what each section actually renders.
-  const DEFAULT_SECTION_ORDER = ['hero', 'trust', 'featured', 'testimonials', 'buy_cta'];
-  const sectionOrder = siteSettings?.homepageSections && siteSettings.homepageSections.length > 0
-    ? [...siteSettings.homepageSections].sort((a, b) => a.order - b.order)
-    : DEFAULT_SECTION_ORDER.map((id, i) => ({ id, enabled: true, order: i } as any));
+  // REVERTED (2026-08-29 — reported broken: "Home page sections gayab/galat
+  // order"): earlier today this page was rewritten to dynamically order/hide
+  // sections based on siteSettings.homepageSections (a new admin feature).
+  // That introduced a live dependency on data that may be stale, empty, or
+  // inconsistent depending on what's actually stored in the database right
+  // now — and it broke the home page. Reverted to always rendering all 5
+  // sections in this fixed, known-good order, with NO dependency on
+  // siteSettings.homepageSections at all. The admin-panel UI for editing
+  // homepageSections still exists and still saves to the database
+  // harmlessly — it just has no effect on this page anymore until the
+  // dynamic-ordering feature is rebuilt and verified properly against a
+  // real environment instead of being reasoned about blind.
+  return (
+    <div className="bg-[#F8F4E8] text-[#4A2C17] pb-16 space-y-12">
 
-  const sectionRenderers: Record<string, React.ReactNode> = {
-    hero: (
+      {/* 1. Main Hero Banner */}
       <ShaktiHeroBanner
         shaktiBook={shaktiBook}
         onBuyNow={handleBuyNow}
         onAuthorsClick={() => onNavigate('authors')}
       />
-    ),
-    trust: <TrustSection />,
-    featured: (
+
+      {/* 2. Trust & Features Section */}
+      <TrustSection />
+
+      {/* 3. Single Featured Book Concise Spotlight */}
       <section className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
         <div className="bg-gradient-to-br from-[#8B1E3F] to-[#5C142B] text-amber-100 rounded-3xl p-6 sm:p-10 shadow-xl border border-amber-400/30 flex flex-col lg:flex-row items-center gap-8 justify-between">
           <div className="space-y-4 max-w-2xl text-center lg:text-left">
@@ -102,28 +109,19 @@ export const HomePage: React.FC<HomePageProps> = ({
           </div>
         </div>
       </section>
-    ),
-    testimonials: (
-      <>
-        {testimonials && testimonials.length > 0 && (
-          <TestimonialsSection testimonials={testimonials} />
-        )}
-        <SacredStats />
-      </>
-    ),
-    buy_cta: (
+
+      {/* 4. Social Proof & Testimonials / Sacred Stats */}
+      {testimonials && testimonials.length > 0 && (
+        <TestimonialsSection testimonials={testimonials} />
+      )}
+      <SacredStats />
+
+      {/* 5. Buy Section (Large Order CTA) */}
       <BuyCtaSection
         shaktiBook={shaktiBook}
         onBuyNow={handleBuyNow}
       />
-    ),
-  };
 
-  return (
-    <div className="bg-[#F8F4E8] text-[#4A2C17] pb-16 space-y-12">
-      {sectionOrder
-        .filter((sec: any) => sec.enabled)
-        .map((sec: any) => <React.Fragment key={sec.id}>{sectionRenderers[sec.id]}</React.Fragment>)}
     </div>
   );
 };

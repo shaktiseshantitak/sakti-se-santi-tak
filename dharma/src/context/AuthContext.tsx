@@ -324,6 +324,24 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       return { success: false, error: 'Invalid admin credentials.' };
     }
 
+    // FIXED (2026-08-30 — CRITICAL: "bina otp ke login ho raha hai"): a
+    // successful signInWithPassword() here creates a real, active Supabase
+    // session — which immediately triggers the onAuthStateChange listener
+    // above, which calls fetchUserProfileAndRole WITHOUT knownAal2. That
+    // function then falls back to checking sessionStorage for a PRIOR OTP
+    // verification for this exact user id. If this same admin had EVER
+    // completed OTP once before in this browser tab (and sessionStorage
+    // was never cleared — e.g. they closed the tab instead of clicking
+    // Logout), that stale flag still matched their user id on this BRAND
+    // NEW login attempt, and isAdmin got set to true immediately — before
+    // this function even finished sending/requiring a fresh OTP code.
+    // Clearing it here, before OTP is even sent, means every fresh
+    // email+password login attempt is provably un-verified until a real
+    // OTP is entered again, closing that race for good — while a plain
+    // page refresh (which never calls this function) is untouched, so it
+    // still doesn't force re-entering a code every time.
+    sessionStorage.removeItem('dharma_admin_otp_verified');
+
     // Verify admin role in user_roles
     const { data: userRole } = await supabase
       .from('user_roles')

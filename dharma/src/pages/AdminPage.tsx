@@ -50,7 +50,7 @@ export const AdminPage: React.FC<AdminPageProps> = ({ onNavigate, onOpenLiveStud
     lastSyncError, clearSyncError,
     contactMessages, markContactMessageRead
   } = useBooks();
-  const { user, isAdmin, sessionToken } = useAuth();
+  const { user, isAdmin, isAuthLoading, sessionToken } = useAuth();
   const [backupStatus, setBackupStatus] = useState<string | null>(null);
   const [isBackingUp, setIsBackingUp] = useState(false);
 
@@ -89,11 +89,28 @@ export const AdminPage: React.FC<AdminPageProps> = ({ onNavigate, onOpenLiveStud
   // URL. The real login only works via the secret /admin/login-user/...
   // path (see App.tsx's PAGE_TO_PATH), which is never linked from
   // anywhere public.
+  // FIXED (2026-08-30 — "Admin panel bar bar logout ho raha ha refresh pr"):
+  // this redirect used to fire the instant `isAdmin` was false — but on
+  // every page refresh, `isAdmin` STARTS false and only becomes true once
+  // the session is restored and re-verified (async). That meant a
+  // legitimate, already-OTP-verified admin got bounced to the homepage on
+  // every single refresh, before their real session even had a chance to
+  // load — this is the exact bug reported. Now waits for isAuthLoading to
+  // settle first (same pattern already used correctly in
+  // CustomerDashboardPage.tsx) before deciding whether to redirect.
   useEffect(() => {
-    if (!isAdmin) {
+    if (!isAuthLoading && !isAdmin) {
       onNavigate('home');
     }
-  }, [isAdmin]);
+  }, [isAdmin, isAuthLoading]);
+
+  if (isAuthLoading) {
+    return (
+      <div className="py-24 flex items-center justify-center bg-[#F8F4E8] min-h-screen">
+        <div className="w-8 h-8 border-4 border-[#D4AF37] border-t-transparent rounded-full animate-spin" />
+      </div>
+    );
+  }
 
   if (!isAdmin) {
     return null;
@@ -507,6 +524,8 @@ export const AdminPage: React.FC<AdminPageProps> = ({ onNavigate, onOpenLiveStud
   const [showMediaModal, setShowMediaModal] = useState<boolean>(false);
 
   const [saveToast, setSaveToast] = useState<string | null>(null);
+  const [expandedOrderId, setExpandedOrderId] = useState<string | null>(null);
+  const [printLabelOrderId, setPrintLabelOrderId] = useState<string | null>(null);
 
   useEffect(() => {
     if (siteSettings) {
@@ -521,6 +540,21 @@ export const AdminPage: React.FC<AdminPageProps> = ({ onNavigate, onOpenLiveStud
       setSettingsCodEnabled(siteSettings.enableCod ?? true);
       setSettingsUpiEnabled(siteSettings.enableUpi ?? true);
       setSettingsOnlinePaymentEnabled(siteSettings.enableOnlinePayment ?? true);
+      // FIXED (2026-08-30 — "footer me add/remove sahi se kaam nahi kar
+      // raha hai"): these two used useState's initializer, which only ever
+      // runs ONCE at first mount. If the admin panel opened before the
+      // real siteSettings had finished loading from Supabase (very likely
+      // — it's an async fetch), this state permanently stuck at an empty
+      // array, silently hiding any columns/sections already saved from a
+      // previous session, and — critically — the very next "Save" would
+      // overwrite the real saved data in the database with that stale
+      // empty array. Now re-synced here every time real siteSettings data
+      // actually arrives/changes, the same pattern already used correctly
+      // for every other field on this line onward.
+      if (siteSettings.footerColumns) setFooterColumns(siteSettings.footerColumns);
+      if (siteSettings.homepageSections && siteSettings.homepageSections.length > 0) setHomepageSections(siteSettings.homepageSections);
+      if (siteSettings.header?.logoUrl !== undefined) setHeaderLogoUrl(siteSettings.header.logoUrl);
+      if (siteSettings.header?.faviconUrl !== undefined) setHeaderFaviconUrl(siteSettings.header.faviconUrl);
       setSettingsHeroTitle(siteSettings.heroBannerOverrideTitle || '');
       setSettingsHeroSubtitle(siteSettings.heroBannerOverrideSubtitle || '');
       setSettingsHeroTagline(siteSettings.heroBannerOverrideTagline || '');
@@ -1333,7 +1367,7 @@ CREATE POLICY "Admin All Access" ON public.books FOR ALL USING (auth.role() = 'a
               onClick={() => setActiveTab('settings')}
               className="bg-amber-600 hover:bg-amber-700 text-white font-extrabold text-xs px-4 py-2.5 rounded-xl flex items-center gap-1.5 shadow border border-amber-400"
             >
-              <Settings className="w-4 h-4 text-amber-200" /> 🎛️ कंट्रोल पैनल (Control Panel)
+              <Settings className="w-4 h-4 text-amber-200" /> 🎛️ सेटिंग्स / कंट्रोल पैनल (Settings)
             </button>
             <button
               onClick={downloadJsonBackup}
@@ -1424,7 +1458,7 @@ CREATE POLICY "Admin All Access" ON public.books FOR ALL USING (auth.role() = 'a
             onClick={() => setActiveTab('settings')}
             className={`pb-3 whitespace-nowrap transition-all ${activeTab === 'settings' ? 'border-b-2 border-amber-600 text-amber-600 font-black' : 'text-zinc-500'}`}
           >
-            🎛️ कंट्रोल पैनल (Control Panel)
+            🎛️ सेटिंग्स / कंट्रोल पैनल (Settings)
           </button>
           <button
             onClick={() => setActiveTab('books')}
@@ -1681,6 +1715,21 @@ CREATE POLICY "Admin All Access" ON public.books FOR ALL USING (auth.role() = 'a
                 className={`px-3 py-2 rounded-xl transition-all whitespace-nowrap ${settingsSubTab === 'homepage' ? 'bg-amber-500 text-zinc-900 font-black shadow-xs' : 'bg-zinc-100 dark:bg-zinc-800 text-zinc-600 dark:text-zinc-300'}`}
               >
                 🏠 3. होमपेज बिल्डर (Hero & Sections)
+              </button>
+              {/* FIXED (2026-08-30 — "Header change karne ka option nahi
+                  hai"): headerLogoUrl/headerFaviconUrl state, and their
+                  save-payload wiring, already existed — and Navbar.tsx
+                  already reads siteSettings.header.logoUrl for real (fixed
+                  in an earlier session). But no button anywhere ever
+                  switched settingsSubTab to 'header_footer', and no
+                  content block rendered for it — so this whole section was
+                  completely unreachable in the UI. */}
+              <button
+                type="button"
+                onClick={() => setSettingsSubTab('header_footer')}
+                className={`px-3 py-2 rounded-xl transition-all whitespace-nowrap ${settingsSubTab === 'header_footer' ? 'bg-amber-500 text-zinc-900 font-black shadow-xs' : 'bg-zinc-100 dark:bg-zinc-800 text-zinc-600 dark:text-zinc-300'}`}
+              >
+                🖼️ हेडर लोगो व फ़ेविकॉन (Header & Favicon)
               </button>
               <button
                 type="button"
@@ -1946,6 +1995,107 @@ CREATE POLICY "Admin All Access" ON public.books FOR ALL USING (auth.role() = 'a
                       />
                     </div>
                   </div>
+                </div>
+              )}
+
+              {/* FIXED (2026-08-30 — "Header change karne ka option nahi
+                  hai"): the content block that was always missing for the
+                  header_footer sub-tab. Logo/favicon URL inputs, plus a
+                  direct file-upload option (reuses the same
+                  processFileUpload helper already used for the book
+                  trailer video upload elsewhere in this file — no new
+                  upload mechanism invented). */}
+              {settingsSubTab === 'header_footer' && (
+                <div className="space-y-6">
+                  <div className="p-5 bg-amber-500/5 dark:bg-zinc-800/50 rounded-2xl border border-amber-500/20 space-y-4">
+                    <h4 className="font-bold text-sm text-amber-800 dark:text-amber-400 uppercase tracking-wider">
+                      🖼️ साइट लोगो (Site Logo)
+                    </h4>
+                    <p className="text-xs text-zinc-500">
+                      Navbar mein logo ke jagah "ॐ" symbol ki jagah dikhega. Khaali chhodne par default "ॐ" symbol hi dikhega.
+                    </p>
+                    <div className="flex items-center gap-4">
+                      {headerLogoUrl && (
+                        <img src={headerLogoUrl} alt="Logo preview" className="w-14 h-14 rounded-xl object-cover border border-amber-300" />
+                      )}
+                      <div className="flex-1 space-y-2">
+                        <input
+                          type="text"
+                          value={headerLogoUrl}
+                          onChange={e => setHeaderLogoUrl(e.target.value)}
+                          placeholder="https://... (logo image URL)"
+                          className="w-full px-3.5 py-2.5 bg-white dark:bg-zinc-900 border border-zinc-300 dark:border-zinc-700 rounded-xl text-xs font-mono"
+                        />
+                        <input
+                          type="file"
+                          accept="image/png,image/jpeg,image/webp,image/svg+xml"
+                          onChange={async e => {
+                            const file = e.target.files?.[0];
+                            if (!file) return;
+                            await processFileUpload(file, 'site-logo', (url) => setHeaderLogoUrl(url), {
+                              maxSizeBytes: 2 * 1024 * 1024,
+                              allowedMimeTypes: ['image/png', 'image/jpeg', 'image/webp', 'image/svg+xml'],
+                            });
+                          }}
+                          className="w-full text-xs"
+                        />
+                      </div>
+                      {headerLogoUrl && (
+                        <button type="button" onClick={() => setHeaderLogoUrl('')} className="text-[10px] font-bold text-rose-600 shrink-0">
+                          Remove
+                        </button>
+                      )}
+                    </div>
+                  </div>
+
+                  <div className="p-5 bg-sky-500/5 dark:bg-zinc-800/50 rounded-2xl border border-sky-500/20 space-y-4">
+                    <h4 className="font-bold text-sm text-sky-800 dark:text-sky-400 uppercase tracking-wider">
+                      🔖 फ़ेविकॉन (Favicon)
+                    </h4>
+                    <p className="text-xs text-zinc-500">
+                      Browser tab mein dikhne wala chhota icon. Recommended: 32x32px ya 64x64px .png/.ico
+                    </p>
+                    <div className="flex items-center gap-4">
+                      {headerFaviconUrl && (
+                        <img src={headerFaviconUrl} alt="Favicon preview" className="w-8 h-8 rounded object-cover border border-sky-300" />
+                      )}
+                      <div className="flex-1 space-y-2">
+                        <input
+                          type="text"
+                          value={headerFaviconUrl}
+                          onChange={e => setHeaderFaviconUrl(e.target.value)}
+                          placeholder="https://... (favicon URL)"
+                          className="w-full px-3.5 py-2.5 bg-white dark:bg-zinc-900 border border-zinc-300 dark:border-zinc-700 rounded-xl text-xs font-mono"
+                        />
+                        <input
+                          type="file"
+                          accept="image/png,image/x-icon,image/vnd.microsoft.icon"
+                          onChange={async e => {
+                            const file = e.target.files?.[0];
+                            if (!file) return;
+                            await processFileUpload(file, 'site-favicon', (url) => setHeaderFaviconUrl(url), {
+                              maxSizeBytes: 1 * 1024 * 1024,
+                              allowedMimeTypes: ['image/png', 'image/x-icon', 'image/vnd.microsoft.icon'],
+                            });
+                          }}
+                          className="w-full text-xs"
+                        />
+                      </div>
+                      {headerFaviconUrl && (
+                        <button type="button" onClick={() => setHeaderFaviconUrl('')} className="text-[10px] font-bold text-rose-600 shrink-0">
+                          Remove
+                        </button>
+                      )}
+                    </div>
+                  </div>
+
+                  <button
+                    type="button"
+                    onClick={handleSaveSettings}
+                    className="bg-amber-600 hover:bg-amber-700 text-white font-bold text-xs px-5 py-2.5 rounded-xl"
+                  >
+                    Save Header Settings
+                  </button>
                 </div>
               )}
 
@@ -2648,6 +2798,16 @@ CREATE POLICY "Admin All Access" ON public.books FOR ALL USING (auth.role() = 'a
         {activeTab === 'orders' && (
           <div className="bg-white dark:bg-zinc-900 rounded-3xl p-6 border border-zinc-200 dark:border-zinc-800 shadow-sm space-y-4">
             <h3 className="font-serif font-bold text-lg text-zinc-900 dark:text-white">Orders Fulfillment & Tracking Update</h3>
+            {/* FIXED (2026-08-30 — "order section chhota hai, customer
+                detail/invoice/shipping label kuch nahi hai"): the table
+                used to show only order#, a name+city sliver, and courier
+                inputs — no email/phone/full address, no way to print an
+                invoice, no shipping label at all. Each row now expands to
+                a full detail panel, and both print actions are real:
+                Print Invoice reuses the exact same invoice OrderSuccessPage
+                already generates (admin can view/print any order's real
+                invoice, not a duplicate second invoice implementation),
+                and Print Shipping Label is a genuinely new printable view. */}
             <div className="overflow-x-auto">
               <table className="w-full text-xs text-left">
                 <thead className="bg-zinc-100 dark:bg-zinc-800 uppercase font-semibold">
@@ -2656,21 +2816,28 @@ CREATE POLICY "Admin All Access" ON public.books FOR ALL USING (auth.role() = 'a
                     <th className="p-3">Customer & Address</th>
                     <th className="p-3">Courier Partner</th>
                     <th className="p-3">Update Order Status</th>
+                    <th className="p-3">Documents</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-zinc-200 dark:divide-zinc-800">
                   {orders.map(o => (
-                    <tr key={o.id}>
-                      <td className="p-3 font-mono font-bold text-amber-900 dark:text-amber-400">{o.orderNumber}</td>
-                      <td className="p-3">
+                    <React.Fragment key={o.id}>
+                    <tr>
+                      <td className="p-3 font-mono font-bold text-amber-900 dark:text-amber-400 align-top">
+                        {o.orderNumber}
+                        <button
+                          type="button"
+                          onClick={() => setExpandedOrderId(expandedOrderId === o.id ? null : o.id)}
+                          className="block mt-1 text-[10px] font-bold text-sky-600 dark:text-sky-400 normal-case"
+                        >
+                          {expandedOrderId === o.id ? '▲ Hide details' : '▼ Full customer details'}
+                        </button>
+                      </td>
+                      <td className="p-3 align-top">
                         <div className="font-bold">{o.shippingAddress.fullName}</div>
                         <div className="text-[10px] text-zinc-500">{o.shippingAddress.city}, {o.shippingAddress.state} - {o.shippingAddress.pincode}</div>
                       </td>
-                      <td className="p-3">
-                        {/* FIXED (2026-08-29 — "manual tracking update
-                            functionality"): courier + tracking number were
-                            display-only before; now editable inline, saved
-                            on blur via updateOrderDetails. */}
+                      <td className="p-3 align-top">
                         <input
                           type="text"
                           defaultValue={o.courierName}
@@ -2686,15 +2853,11 @@ CREATE POLICY "Admin All Access" ON public.books FOR ALL USING (auth.role() = 'a
                           className="w-full bg-zinc-100 dark:bg-zinc-800 border border-zinc-300 dark:border-zinc-700 rounded-lg px-2 py-1 text-[11px] font-mono"
                         />
                       </td>
-                      <td className="p-3">
+                      <td className="p-3 align-top">
                         <select
                           value={o.orderStatus}
                           onChange={async e => {
                             const newStatus = e.target.value as OrderStatus;
-                            // FIXED: routed through the secure server
-                            // endpoint (writes real order_status_history +
-                            // restores stock on cancel) instead of the old
-                            // client-side-only updateOrderStatus.
                             const resp = await fetch('/api/admin/update-order-status', {
                               method: 'POST',
                               headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${sessionToken}` },
@@ -2716,16 +2879,113 @@ CREATE POLICY "Admin All Access" ON public.books FOR ALL USING (auth.role() = 'a
                           <option value="Cancelled">Cancelled</option>
                         </select>
                         <p className="text-[9px] text-zinc-400 mt-1">
-                          Shipped/Cancelled auto-updates stock (see BookContext.tsx)
+                          Shipped/Cancelled auto-updates stock
                         </p>
                       </td>
+                      <td className="p-3 align-top space-y-1">
+                        <button
+                          type="button"
+                          onClick={() => onNavigate('order-success', { orderId: o.id })}
+                          className="block w-full text-[10px] font-bold bg-amber-100 dark:bg-amber-900/40 text-amber-800 dark:text-amber-300 px-2 py-1.5 rounded-lg"
+                        >
+                          🧾 Print Invoice
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => setPrintLabelOrderId(o.id)}
+                          className="block w-full text-[10px] font-bold bg-sky-100 dark:bg-sky-900/40 text-sky-800 dark:text-sky-300 px-2 py-1.5 rounded-lg"
+                        >
+                          📦 Shipping Label
+                        </button>
+                      </td>
                     </tr>
+                    {expandedOrderId === o.id && (
+                      <tr>
+                        <td colSpan={5} className="p-4 bg-zinc-50 dark:bg-zinc-800/40">
+                          <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 text-[11px]">
+                            <div>
+                              <p className="font-bold text-zinc-700 dark:text-zinc-300 mb-1">Customer Contact</p>
+                              <p>📧 {o.shippingAddress.email || '—'}</p>
+                              <p>📞 {o.shippingAddress.phone || '—'}</p>
+                            </div>
+                            <div>
+                              <p className="font-bold text-zinc-700 dark:text-zinc-300 mb-1">Full Shipping Address</p>
+                              <p>{o.shippingAddress.addressLine1}</p>
+                              {o.shippingAddress.addressLine2 && <p>{o.shippingAddress.addressLine2}</p>}
+                              <p>{o.shippingAddress.city}, {o.shippingAddress.state} - {o.shippingAddress.pincode}</p>
+                              <p>{o.shippingAddress.country}</p>
+                            </div>
+                            <div>
+                              <p className="font-bold text-zinc-700 dark:text-zinc-300 mb-1">Payment & Items</p>
+                              <p>{o.paymentMethod} — {o.paymentStatus}</p>
+                              <p>Total: ₹{o.totalAmount.toLocaleString('en-IN')}</p>
+                              <p>{o.items.length} item(s): {o.items.map(it => it.bookTitle).join(', ')}</p>
+                            </div>
+                          </div>
+                        </td>
+                      </tr>
+                    )}
+                    </React.Fragment>
                   ))}
                 </tbody>
               </table>
             </div>
           </div>
         )}
+
+        {/* Printable Shipping Label modal */}
+        {printLabelOrderId && (() => {
+          const labelOrder = orders.find(o => o.id === printLabelOrderId);
+          if (!labelOrder) return null;
+          return (
+            <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4 print:bg-white print:p-0">
+              <div className="bg-white w-full max-w-md rounded-3xl p-8 border-4 border-dashed border-zinc-800 space-y-4 print:border-2 print:rounded-none print:max-w-full">
+                <div className="flex justify-between items-start">
+                  <div>
+                    <p className="font-serif font-extrabold text-lg text-[#8B1E3F]">Shakti Se Shanti Tak</p>
+                    <p className="text-[10px] text-zinc-500">shaktiseshanti.com</p>
+                  </div>
+                  <button onClick={() => setPrintLabelOrderId(null)} className="print:hidden text-zinc-400">
+                    <X className="w-5 h-5" />
+                  </button>
+                </div>
+                <div className="border-t-2 border-dashed border-zinc-300 pt-4">
+                  <p className="text-[10px] uppercase font-bold text-zinc-400">Ship To</p>
+                  <p className="font-extrabold text-lg text-zinc-900">{labelOrder.shippingAddress.fullName}</p>
+                  <p className="text-sm text-zinc-800">{labelOrder.shippingAddress.addressLine1}</p>
+                  {labelOrder.shippingAddress.addressLine2 && <p className="text-sm text-zinc-800">{labelOrder.shippingAddress.addressLine2}</p>}
+                  <p className="text-sm text-zinc-800">{labelOrder.shippingAddress.city}, {labelOrder.shippingAddress.state} - {labelOrder.shippingAddress.pincode}</p>
+                  <p className="text-sm text-zinc-800">{labelOrder.shippingAddress.country}</p>
+                  <p className="text-sm font-bold text-zinc-900 mt-1">📞 {labelOrder.shippingAddress.phone}</p>
+                </div>
+                <div className="border-t-2 border-dashed border-zinc-300 pt-4 grid grid-cols-2 gap-2 text-xs">
+                  <div>
+                    <p className="text-[10px] uppercase font-bold text-zinc-400">Order #</p>
+                    <p className="font-mono font-bold">{labelOrder.orderNumber}</p>
+                  </div>
+                  <div>
+                    <p className="text-[10px] uppercase font-bold text-zinc-400">Courier</p>
+                    <p className="font-bold">{labelOrder.courierName || 'TBD'}</p>
+                  </div>
+                  <div>
+                    <p className="text-[10px] uppercase font-bold text-zinc-400">Payment</p>
+                    <p className="font-bold">{labelOrder.paymentMethod === 'COD' ? `COD ₹${labelOrder.totalAmount}` : 'PREPAID'}</p>
+                  </div>
+                  <div>
+                    <p className="text-[10px] uppercase font-bold text-zinc-400">Items</p>
+                    <p className="font-bold">{labelOrder.items.reduce((s, i) => s + i.quantity, 0)} book(s)</p>
+                  </div>
+                </div>
+                <button
+                  onClick={() => window.print()}
+                  className="print:hidden w-full bg-[#8B1E3F] text-white font-bold text-sm py-3 rounded-xl"
+                >
+                  Print Label
+                </button>
+              </div>
+            </div>
+          );
+        })()}
 
         {/* Tab 5: Categories & Authors */}
         {activeTab === 'categories' && (
