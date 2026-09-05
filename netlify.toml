@@ -1,0 +1,98 @@
+# ============================================================
+# DHARMA BOOKS PRO - NETLIFY EDGE & HIGH-PERFORMANCE CONFIG
+# ============================================================
+
+[build]
+  command = "npm run build"
+  publish = "dist"
+
+[functions]
+  directory = "netlify/functions"
+
+# Runs the Google Sheets backup once a day automatically (see
+# netlify/functions/daily-backup.ts). Requires GOOGLE_APPS_SCRIPT_WEBHOOK_URL
+# (a Google Sheet's own Apps Script Web App link — no Cloud Console, no
+# service account needed; see the deployment guide for setup) to be
+# set in Netlify's environment variables — without them this function exits
+# early and logs a warning, it does not fail the deploy.
+[functions."daily-backup"]
+  schedule = "0 20 * * *"
+
+# Sweeps up abandoned/never-completed online payments every 15 minutes —
+# see netlify/functions/sweep-stale-orders.ts.
+[functions."sweep-stale-orders"]
+  schedule = "*/15 * * * *"
+
+# Netlify Serverless Function API Redirect
+[[redirects]]
+  from = "/api/*"
+  to = "/.netlify/functions/api/:splat"
+  status = 200
+
+# FIXED (2026-08-29 — "Control Panel is dummy": robots.txt rules saved in
+# the admin panel had no effect at all, because Netlify serves the static
+# public/robots.txt file directly for any non-/api/* path — the Express
+# server (where site_settings actually lives) never even sees this
+# request in production. Routing it through the API function instead lets
+# it reflect whatever the admin actually saved.
+[[redirects]]
+  from = "/robots.txt"
+  to = "/api/seo/robots-txt"
+  status = 200
+
+# Single Page Application SPA Redirect
+[[redirects]]
+  from = "/*"
+  to = "/index.html"
+  status = 200
+
+# Immutable Long-Term Caching & Compression for Static JS/CSS Bundles
+[[headers]]
+  for = "/assets/*"
+  [headers.values]
+    Cache-Control = "public, max-age=31536000, immutable"
+    Vary = "Accept-Encoding"
+    X-Content-Type-Options = "nosniff"
+
+# Compression & Caching for Media, Fonts and Images
+[[headers]]
+  for = "*.png"
+  [headers.values]
+    Cache-Control = "public, max-age=31536000, immutable"
+    Vary = "Accept-Encoding"
+
+[[headers]]
+  for = "*.jpg"
+  [headers.values]
+    Cache-Control = "public, max-age=31536000, immutable"
+    Vary = "Accept-Encoding"
+
+[[headers]]
+  for = "*.webp"
+  [headers.values]
+    Cache-Control = "public, max-age=31536000, immutable"
+    Vary = "Accept-Encoding"
+
+[[headers]]
+  for = "*.svg"
+  [headers.values]
+    Cache-Control = "public, max-age=31536000, immutable"
+    Vary = "Accept-Encoding"
+
+[[headers]]
+  for = "*.woff2"
+  [headers.values]
+    Cache-Control = "public, max-age=31536000, immutable"
+    Vary = "Accept-Encoding"
+
+# Global Security & HTML Cache Revalidation
+[[headers]]
+  for = "/*"
+  [headers.values]
+    Vary = "Accept-Encoding"
+    X-Frame-Options = "SAMEORIGIN"
+    X-Content-Type-Options = "nosniff"
+    X-XSS-Protection = "1; mode=block"
+    Strict-Transport-Security = "max-age=31536000; includeSubDomains; preload"
+    Referrer-Policy = "strict-origin-when-cross-origin"
+    Permissions-Policy = "camera=(self), microphone=(self), geolocation=(), payment=(self)"

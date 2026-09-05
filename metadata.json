@@ -1,0 +1,6 @@
+{
+  "name": "Shakti Se Shanti - shaktiseshanti.com",
+  "description": "Official Website for Shakti Se Shanti (शक्ति से शांति) book by Kunjesh Sharma & Poonam Sharma. Deep Gayatri Mantra and Durga Mantra Secrets.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
