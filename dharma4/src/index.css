@@ -1,0 +1,126 @@
+@import "tailwindcss";
+
+:root {
+  --bg-parchment: #F8F4E8;
+  --bg-card: #FFF8EE;
+  --text-dark-brown: #3A1F0D;
+  --text-muted-brown: #6E4E37;
+  --royal-maroon: #8B1E3F;
+  --royal-maroon-dark: #66122C;
+  --temple-gold: #D4AF37;
+  --temple-gold-light: #F4E285;
+}
+
+html, body {
+  width: 100%;
+  max-width: 100%;
+  overflow-x: hidden;
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+  background-color: #F8F4E8 !important;
+  color: #3A1F0D !important;
+  font-family: system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+}
+
+body {
+  background-color: #F8F4E8 !important;
+  /* Single light linear gradient for warm subtle depth without background images or textures */
+  background-image: linear-gradient(180deg, #FAF6EE 0%, #F8F4E8 100%);
+}
+
+#root {
+  width: 100%;
+  max-width: 100%;
+  overflow-x: hidden;
+  min-height: 100vh;
+  display: flex;
+  flex-direction: column;
+  background-color: transparent;
+}
+
+img, video, canvas, svg, iframe {
+  max-width: 100%;
+  height: auto;
+}
+
+/* Used by the OmMandalaLoader page-transition loader's rotating tagline */
+@keyframes fadeIn {
+  from { opacity: 0; transform: translateY(4px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+@layer utilities {
+  .glass-panel {
+    background: #FFF8EE;
+    border: 1px solid rgba(212, 175, 55, 0.3);
+    box-shadow: 0 1px 2px 0 rgba(74, 44, 23, 0.05);
+  }
+
+  .dark .glass-panel {
+    background: #FFF8EE;
+    border: 1px solid rgba(212, 175, 55, 0.3);
+    box-shadow: 0 1px 2px 0 rgba(74, 44, 23, 0.05);
+  }
+
+  .glass-card {
+    background: #FFF8EE;
+    border: 1px solid rgba(212, 175, 55, 0.3);
+    box-shadow: 0 1px 2px 0 rgba(74, 44, 23, 0.05);
+    transition: border-color 0.15s ease, background-color 0.15s ease;
+  }
+
+  .glass-card:hover {
+    background: #FFFFFF;
+    border-color: rgba(212, 175, 55, 0.6);
+    box-shadow: 0 1px 3px 0 rgba(139, 30, 63, 0.08);
+  }
+
+  .dark .glass-card {
+    background: #FFF8EE;
+    border: 1px solid rgba(212, 175, 55, 0.3);
+    box-shadow: 0 1px 2px 0 rgba(74, 44, 23, 0.05);
+  }
+
+  .dark .glass-card:hover {
+    background: #FFFFFF;
+    border-color: rgba(212, 175, 55, 0.6);
+    box-shadow: 0 1px 3px 0 rgba(139, 30, 63, 0.08);
+  }
+
+  .glass-header {
+    background: #8B1E3F;
+    border-bottom: 1px solid rgba(212, 175, 55, 0.35);
+  }
+
+  .dark .glass-header {
+    background: #8B1E3F;
+    border-bottom: 1px solid rgba(212, 175, 55, 0.35);
+  }
+
+  .glass-pill {
+    background: rgba(212, 175, 55, 0.15);
+    border: 1px solid rgba(212, 175, 55, 0.4);
+  }
+}
+
+/* WCAG 2.1 AA High-Contrast Focus Ring Standards */
+*:focus-visible {
+  outline: 2px solid #D4AF37 !important;
+  outline-offset: 2px !important;
+}
+
+.glass-card:focus-visible,
+.glass-panel:focus-visible,
+.glass-pill:focus-visible,
+button:focus-visible,
+a:focus-visible,
+input:focus-visible,
+select:focus-visible,
+textarea:focus-visible {
+  border-color: #D4AF37 !important;
+  outline: 2px solid #D4AF37 !important;
+  outline-offset: 2px !important;
+}
+
+
