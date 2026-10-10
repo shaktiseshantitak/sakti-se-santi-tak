@@ -1,0 +1,113 @@
+# ============================================================
+# DHARMA BOOKS PRO - NETLIFY EDGE & HIGH-PERFORMANCE CONFIG
+# ============================================================
+
+[build]
+  command = "npm run build"
+  publish = "dist"
+
+[functions]
+  directory = "netlify/functions"
+
+# Runs the Google Sheets backup once a day automatically (see
+# netlify/functions/daily-backup.ts). Requires GOOGLE_APPS_SCRIPT_WEBHOOK_URL
+# (a Google Sheet's own Apps Script Web App link — no Cloud Console, no
+# service account needed; see the deployment guide for setup) to be
+# set in Netlify's environment variables — without them this function exits
+# early and logs a warning, it does not fail the deploy.
+[functions."daily-backup"]
+  schedule = "0 20 * * *"
+
+# Sweeps up abandoned/never-completed online payments every 15 minutes —
+# see netlify/functions/sweep-stale-orders.ts.
+[functions."sweep-stale-orders"]
+  schedule = "*/15 * * * *"
+
+# Netlify Serverless Function API Redirect
+[[redirects]]
+  from = "/api/*"
+  to = "/.netlify/functions/api/:splat"
+  status = 200
+
+# FIXED (2026-08-29 — "Control Panel is dummy": robots.txt rules saved in
+# the admin panel had no effect at all, because Netlify serves the static
+# public/robots.txt file directly for any non-/api/* path — the Express
+# server (where site_settings actually lives) never even sees this
+# request in production. Routing it through the API function instead lets
+# it reflect whatever the admin actually saved.
+[[redirects]]
+  from = "/robots.txt"
+  to = "/api/seo/robots-txt"
+  status = 200
+
+# FIXED (2026-09-26 — "SEO dummy hai"): same problem as robots.txt above —
+# Netlify would otherwise always serve the static, hardcoded public/sitemap.xml
+# instead of the real, live-catalog sitemap built in server.ts.
+[[redirects]]
+  from = "/sitemap.xml"
+  to = "/api/seo/sitemap-xml"
+  status = 200
+
+# Single Page Application SPA Redirect
+[[redirects]]
+  from = "/*"
+  to = "/index.html"
+  status = 200
+
+# Immutable Long-Term Caching & Compression for Static JS/CSS Bundles
+[[headers]]
+  for = "/assets/*"
+  [headers.values]
+    Cache-Control = "public, max-age=31536000, immutable"
+    Vary = "Accept-Encoding"
+    X-Content-Type-Options = "nosniff"
+
+# Compression & Caching for Media, Fonts and Images
+[[headers]]
+  for = "*.png"
+  [headers.values]
+    Cache-Control = "public, max-age=31536000, immutable"
+    Vary = "Accept-Encoding"
+
+[[headers]]
+  for = "*.jpg"
+  [headers.values]
+    Cache-Control = "public, max-age=31536000, immutable"
+    Vary = "Accept-Encoding"
+
+[[headers]]
+  for = "*.webp"
+  [headers.values]
+    Cache-Control = "public, max-age=31536000, immutable"
+    Vary = "Accept-Encoding"
+
+[[headers]]
+  for = "*.svg"
+  [headers.values]
+    Cache-Control = "public, max-age=31536000, immutable"
+    Vary = "Accept-Encoding"
+
+[[headers]]
+  for = "*.woff2"
+  [headers.values]
+    Cache-Control = "public, max-age=31536000, immutable"
+    Vary = "Accept-Encoding"
+
+# Global Security & HTML Cache Revalidation
+[[headers]]
+  for = "/*"
+  [headers.values]
+    Vary = "Accept-Encoding"
+    X-Frame-Options = "SAMEORIGIN"
+    X-Content-Type-Options = "nosniff"
+    X-XSS-Protection = "1; mode=block"
+    Strict-Transport-Security = "max-age=31536000; includeSubDomains; preload"
+    Referrer-Policy = "strict-origin-when-cross-origin"
+    Permissions-Policy = "camera=(self), microphone=(self), geolocation=(), payment=(self)"
+    # Report-only on purpose (see SECURITY_FIX_STATUS.md): promote to
+    # "Content-Security-Policy" only after checkout, admin, video/audio and
+    # the CMS-injected tracking scripts show no violations in a real browser
+    # console. Keep in sync with server.ts (SITE_CSP_REPORT_ONLY) and
+    # public/_headers.
+    Content-Security-Policy-Report-Only = "default-src 'self'; script-src 'self' 'unsafe-inline' https://checkout.razorpay.com https://www.googletagmanager.com https://connect.facebook.net; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com data:; img-src 'self' data: blob: https:; media-src 'self' blob: https:; connect-src 'self' https://*.supabase.co wss://*.supabase.co https://api.razorpay.com https://lumberjack.razorpay.com https://www.google-analytics.com https://*.r2.dev https://api.cloudinary.com; frame-src 'self' https://api.razorpay.com https://checkout.razorpay.com https://www.youtube.com https://www.youtube-nocookie.com https://drive.google.com; object-src 'none'; base-uri 'self'; form-action 'self'; frame-ancestors 'self'"
+
