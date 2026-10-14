@@ -1,0 +1,33 @@
+{
+  "compilerOptions": {
+    "target": "ES2022",
+    "experimentalDecorators": true,
+    "useDefineForClassFields": false,
+    "module": "ESNext",
+    "lib": [
+      "ES2022",
+      "DOM",
+      "DOM.Iterable"
+    ],
+    "skipLibCheck": true,
+    "moduleResolution": "bundler",
+    "isolatedModules": true,
+    "moduleDetection": "force",
+    "allowJs": true,
+    "jsx": "react-jsx",
+    "paths": {
+      "@/*": [
+        "./*"
+      ]
+    },
+    "allowImportingTsExtensions": true,
+    "noEmit": true
+  },
+  // netlify/edge-functions runs on Netlify's own Deno-based edge runtime,
+  // not Node — it has its own globals (Deno.*) and imports
+  // (@netlify/edge-functions) that don't exist in this project's Node/
+  // browser type setup, and Netlify compiles/bundles it independently of
+  // this tsconfig at deploy time. Excluded so `npm run lint` (tsc
+  // --noEmit) doesn't fail on a file it was never meant to typecheck.
+  "exclude": ["netlify/edge-functions"]
+}
