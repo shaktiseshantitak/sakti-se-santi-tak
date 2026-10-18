@@ -1,0 +1,46 @@
+// Runs migration 028 on a real Postgres engine (in-process). Setup once: npm i --no-save @electric-sql/pglite  then: node tests/migration-028.pglite.test.mjs
+import { PGlite } from '@electric-sql/pglite';
+import fs from 'node:fs';
+const db = new PGlite();
+await db.exec(`
+ CREATE ROLE anon NOLOGIN; CREATE ROLE authenticated NOLOGIN;
+ GRANT USAGE ON SCHEMA public TO anon, authenticated;
+ CREATE TABLE public.user_roles(user_id uuid, role text);
+ CREATE SCHEMA IF NOT EXISTS auth;
+ CREATE FUNCTION auth.uid() RETURNS uuid LANGUAGE sql AS $$ SELECT NULLIF(current_setting('request.uid', true),'')::uuid $$;
+ CREATE FUNCTION public.is_admin() RETURNS boolean LANGUAGE plpgsql SECURITY DEFINER SET search_path=public AS $$ BEGIN RETURN EXISTS(SELECT 1 FROM public.user_roles WHERE user_id=auth.uid() AND role='admin'); END $$;
+ GRANT USAGE ON SCHEMA auth TO anon, authenticated;
+ GRANT EXECUTE ON FUNCTION auth.uid() TO anon, authenticated;
+ GRANT EXECUTE ON FUNCTION public.is_admin() TO authenticated;
+ INSERT INTO public.user_roles VALUES ('11111111-1111-1111-1111-111111111111','admin');
+`);
+const sql = fs.readFileSync(new URL('../supabase/migrations/028_newsletter_subscribers.sql', import.meta.url),'utf8');
+await db.exec(sql); await db.exec(sql); // run twice = safe to re-run
+let pass=0, fail=0;
+const t = async (name, fn) => { try { await fn(); pass++; console.log('PASS', name); } catch(e){ fail++; console.log('FAIL', name, '-', e.message); } };
+const expectErr = async (q, frag) => { try { await db.query(q); } catch(e){ if(!e.message.includes(frag)) throw new Error('wrong error: '+e.message); return; } throw new Error('expected error: '+frag); };
+await db.exec("SET ROLE anon");
+await t('anon CANNOT insert directly', () => expectErr("INSERT INTO public.newsletter_subscribers(email) VALUES ('a@x.com')", 'permission denied'));
+await t('anon CANNOT read the list', () => expectErr("SELECT * FROM public.newsletter_subscribers", 'permission denied'));
+await t('anon CANNOT delete', () => expectErr("DELETE FROM public.newsletter_subscribers", 'permission denied'));
+await t('anon can subscribe via function', async () => { await db.query("SELECT public.subscribe_newsletter('  Reader@Example.COM ')"); });
+await t('duplicate is a silent success (no enumeration)', async () => { await db.query("SELECT public.subscribe_newsletter('reader@example.com')"); });
+for (const bad of ['', 'abc', 'a@b', 'a b@x.com', '<x>@x.com']) await t('rejects invalid: '+JSON.stringify(bad), () => expectErr(`SELECT public.subscribe_newsletter('${bad}')`, 'invalid_email'));
+await t('rejects NULL', () => expectErr("SELECT public.subscribe_newsletter(NULL)", 'invalid_email'));
+await t('SQL-injection style input is just rejected/inert', () => expectErr("SELECT public.subscribe_newsletter($$x'; DROP TABLE public.newsletter_subscribers;--@x.com$$)", 'invalid_email'));
+await db.exec("RESET ROLE");
+await t('stored once, lower-cased, trimmed', async () => { const r = await db.query("SELECT email FROM public.newsletter_subscribers"); if (r.rows.length!==1||r.rows[0].email!=='reader@example.com') throw new Error(JSON.stringify(r.rows)); });
+await db.exec("SET ROLE authenticated");
+await t('normal logged-in user CANNOT read list (RLS)', async () => { const r = await db.query("SELECT * FROM public.newsletter_subscribers"); if (r.rows.length!==0) throw new Error('leaked '+r.rows.length); });
+await t('normal user CANNOT delete', async () => { await db.query("DELETE FROM public.newsletter_subscribers"); const c = await db.query("SELECT count(*)::int n FROM public.newsletter_subscribers"); }); 
+await db.exec("RESET ROLE");
+await t('row still exists after non-admin delete attempt', async () => { const r = await db.query("SELECT count(*)::int n FROM public.newsletter_subscribers"); if (r.rows[0].n!==1) throw new Error('deleted! '+r.rows[0].n); });
+await db.exec("SET ROLE authenticated; SET request.uid='11111111-1111-1111-1111-111111111111'");
+await t('ADMIN can read', async () => { const r = await db.query("SELECT * FROM public.newsletter_subscribers"); if (r.rows.length!==1) throw new Error('rows '+r.rows.length); });
+await t('ADMIN can delete', async () => { await db.query("DELETE FROM public.newsletter_subscribers"); const r = await db.query("SELECT count(*)::int n FROM public.newsletter_subscribers"); if (r.rows[0].n!==0) throw new Error('not deleted'); });
+await t('ADMIN cannot UPDATE rows (no policy)', async () => { await db.exec("RESET ROLE"); await db.query("SELECT public.subscribe_newsletter('u@x.com')"); await db.exec("SET ROLE authenticated; SET request.uid='11111111-1111-1111-1111-111111111111'"); await expectErr("UPDATE public.newsletter_subscribers SET email='z@x.com'", 'permission denied'); });
+await db.exec("RESET ROLE; SET ROLE anon");
+await t('flood brake: 60/min site-wide', async () => { let blocked=false; for (let i=0;i<70;i++){ try{ await db.query(`SELECT public.subscribe_newsletter('bulk${i}@x.com')`);}catch(e){ if(e.message.includes('rate_limited')) {blocked=true;break;} else throw e; } } if(!blocked) throw new Error('never blocked'); });
+await db.exec("RESET ROLE");
+await t('table-level CHECK rejects uppercase/garbage even for superuser bugs', () => expectErr("INSERT INTO public.newsletter_subscribers(email) VALUES ('UPPER@X.COM')", 'newsletter_email_format'));
+console.log(`\n${pass} passed, ${fail} failed`); process.exit(fail?1:0);

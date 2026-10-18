@@ -1,0 +1,13 @@
+import React from 'react';
+import { renderToStaticMarkup } from 'react-dom/server';
+import { AdminSidebar } from '../src/components/admin/layout/AdminSidebar';
+import { AdminPageHeader } from '../src/components/admin/layout/AdminPageHeader';
+import { ADMIN_SECTIONS } from '../src/components/admin/layout/adminNav';
+const html = renderToStaticMarkup(<AdminSidebar activeTab="books" onTabChange={()=>{}} onViewSite={()=>{}} badges={{books:3,orders:12}} />);
+const ok=(n:string,c:boolean)=>{console.log((c?'PASS ':'FAIL ')+n); if(!c) process.exitCode=1;};
+ok('renders all 14 sections', ADMIN_SECTIONS.length===14 && ADMIN_SECTIONS.every(s=>html.includes(`>${s.label.replace(/&/g, "&amp;")}<`)));
+ok('exactly one item marked active (aria-current)', (html.match(/aria-current="page"/g)||[]).length===1);
+ok('badge counts shown', html.includes('>3<') && html.includes('>12<'));
+const h = renderToStaticMarkup(<AdminPageHeader activeTab="orders"><button>x</button></AdminPageHeader>);
+ok('header shows section title', h.includes('>Orders<') && h.includes('Track payments'));
+ok('unknown tab falls back to dashboard', renderToStaticMarkup(<AdminPageHeader activeTab="zzz"/>).includes('>Dashboard<'));
